@@ -279,8 +279,6 @@ if [ -d "/etc/cloak" ]; then
 			echo "2) aes-128-gcm"
 			echo "3) aes-256-gcm"
 			echo "4) chacha20-poly1305"
-			echo "5) xchacha20-poly1305"
-
 			read -r -p "Which encryption method you want to use?[1~3]: " -e -i 2 OPTION
 			case $OPTION in
 			2)
@@ -290,9 +288,6 @@ if [ -d "/etc/cloak" ]; then
 				ckcrypt="aes-256-gcm"
 				;;
 			4)
-				ckcrypt="chacha20-poly1305"
-				;;
-			5)
 				ckcrypt="chacha20-poly1305"
 				;;
 			*)
