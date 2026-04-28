@@ -26,7 +26,7 @@ fetch_and_run() {
     local script_name="$1"
     local script_path="${INSTALL_DIR}/${script_name}"
 
-    echo -e "${GREEN}Fetching latest version of ${script_name}...${NC}"
+    echo -e "\n${GREEN}Fetching latest version of ${script_name}...${NC}"
 
     if curl -sSfL "${GIT_REPO}/${script_name}" -o "$script_path"; then
         chmod 700 "$script_path"
@@ -38,40 +38,42 @@ fetch_and_run() {
 }
 
 display_menu() {
-    echo -en "${GREEN}Choose the action:
+    echo -en "\n${GREEN}Choose the action:
 [1] Setup WireGuard server
-[2] Restore configuration backup
-[3] Add new client (peer)
-[4] Show client (peer) QR
-[5] Create configuration backup
+[2] Add new client (peer)
+[3] Show client (peer) QR
+[4] List configured clients
+[5] Backup & Restore Manager
 ${RED}[6] Remove WireGuard server from this system${GREEN}
-[7] List configured clients
 
-[1/2/3/4/5/6/7]: ${NC}"
+[1/2/3/4/5/6]: ${NC}"
 }
 
 main() {
     init_environment
-    display_menu
-    read -r OPTION
+    # Loop the main menu so it returns after completing a task
+    while true; do
+        display_menu
+        read -r OPTION
 
-    case "$OPTION" in
-        1) fetch_and_run "setup_server.sh" ;;
-        2) fetch_and_run "restore_backup.sh" ;;
-        3) fetch_and_run "add_client.sh" ;;
-        4) fetch_and_run "show_qr.sh" ;;
-        5) fetch_and_run "create_backup.sh" ;;
-        6)
-            fetch_and_run "remove_server.sh"
-            echo -e "${GREEN}Cleaning up environment...${NC}"
-            rm -rf "$INSTALL_DIR"
-            ;;
-        7) fetch_and_run "list_clients.sh" ;;
-        *)
-            echo -e "${PURPLE}Exit: The system was not modified.${NC}"
-            exit 0
-            ;;
-    esac
+        case "$OPTION" in
+            1) fetch_and_run "setup_server.sh" ;;
+            2) fetch_and_run "add_client.sh" ;;
+            3) fetch_and_run "show_qr.sh" ;;
+            4) fetch_and_run "list_clients.sh" ;;
+            5) fetch_and_run "backup_manager.sh" ;;
+            6)
+                fetch_and_run "remove_server.sh"
+                echo -e "${GREEN}Cleaning up environment...${NC}"
+                rm -rf "$INSTALL_DIR"
+                break
+                ;;
+            *)
+                echo -e "${PURPLE}Exit: The system was not modified.${NC}"
+                exit 0
+                ;;
+        esac
+    done
 }
 
 main
