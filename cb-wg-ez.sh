@@ -1,6 +1,6 @@
 #!/bin/bash
 # Strict mode for maximum stability and security
-set -euo pipefail 
+set -euo pipefail
 
 # Define colors
 GREEN='\033[0;32m'
