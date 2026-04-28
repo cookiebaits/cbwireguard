@@ -1,8 +1,5 @@
-Here is the fully updated, highly professional README.md for your repository.
-
-I have restructured it for better scannability, highlighted all of the high-performance upgrades we just built, and updated the instructions to match the new dynamic menu layout.
-
 Cookie's Easy WireGuard Server
+
 A heavily optimized, hyper-secure, and lightning-fast deployment script to configure and manage a WireGuard VPN server.
 
 This wrapper dynamically pulls the latest scripts from GitHub, ensuring your server is always running the most up-to-date and secure code. Tested to work on Ubuntu 20.04 and newer.
