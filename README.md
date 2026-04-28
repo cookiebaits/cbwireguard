@@ -13,7 +13,7 @@ Maybe you wil need install *curl*. You can do it with
 
 Download and run script with:
 ```
-curl -O https://raw.githubusercontent.com/bllizard22/easy-wireguard-server/main/easy_wireguard.sh
+curl -O https://raw.githubusercontent.com/cookiebaits/cbwireguard/main/easy_wireguard.sh
 chmod +x easy_wireguard.sh
 ./easy_wireguard.sh
 ```
