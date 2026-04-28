@@ -9,7 +9,7 @@ PURPLE='\033[0;35m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-# Updated to pull dynamically from your specific repository
+# Pull dynamically from your cookiebaits repository
 GIT_REPO='https://raw.githubusercontent.com/cookiebaits/cbwireguard/main'
 INSTALL_DIR="/root/easy_wireguard" # Secure location for VPN scripts
 
@@ -28,21 +28,20 @@ init_environment() {
     chmod 700 "$INSTALL_DIR" 
 }
 
-# P1 & P3: Lightweight Fetch & Execute - Only downloads what is needed, forcing the latest version.
+# P1 & P3: Lightweight Fetch & Execute
 fetch_and_run() {
     local script_name="$1"
     local script_path="${INSTALL_DIR}/${script_name}"
 
-    echo -e "${GREEN}Fetching latest version of ${script_name} from cookiebaits repo...${NC}"
+    echo -e "${GREEN}Fetching latest version of ${script_name}...${NC}"
 
     # curl flags: -s (silent), -S (show error), -f (fail on HTTP errors like 404), -L (follow redirects)
     if curl -sSfL "${GIT_REPO}/${script_name}" -o "$script_path"; then
         chmod 700 "$script_path"
-        # Execute the newly downloaded script
         "$script_path"
     else
         echo -e "${RED}Error: Failed to pull ${script_name} from ${GIT_REPO}.${NC}"
-        echo -e "${RED}Please check your repository structure, ensure the branch is 'main', and verify your connection.${NC}"
+        echo -e "${RED}Verify the file exists on your GitHub 'main' branch.${NC}"
         exit 1
     fi
 }
@@ -66,7 +65,7 @@ main() {
     display_menu
     read -r OPTION
 
-    # Secure input handling using a case statement instead of nested ifs
+    # Secure input handling
     case "$OPTION" in
         1) fetch_and_run "setup_server.sh" ;;
         2) fetch_and_run "restore_backup.sh" ;;
