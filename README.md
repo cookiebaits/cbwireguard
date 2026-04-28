@@ -1,5 +1,5 @@
 # Easy WireGuard Server
-Script to easily configure the WireGuard server. You can select desired action in `./cb-wg-ez.sh` script and it will guide you through the process.
+Script to easily configure the WireGuard server. You can select desired action in `./cb_wgez.sh` script and it will guide you through the process.
 Guaranteed to work on Ubuntu 20.04.
 
 ## Step 1
@@ -13,10 +13,10 @@ Maybe you wil need install *curl*. You can do it with
 
 Download and run script with:
 ```
-curl -O https://github.com/cookiebaits/cbwireguard/cb-wg-ez.sh?raw=true | https://raw.githubusercontent.com/bllizard22/easy-wireguard-server/main/easy_wireguard.sh
+curl -O https://github.com/cookiebaits/cbwireguard/cb_wgez.sh?raw=true | old https://raw.githubusercontent.com/bllizard22/easy-wireguard-server/main/easy_wireguard.sh
 
-chmod +x cb-wg-ez.sh
-./cb-wg-ez.sh
+chmod +x cb_wgez.sh
+./cb_wgez.sh
 ```
 
 You will be prompted to pick the action
