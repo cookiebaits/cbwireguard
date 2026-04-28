@@ -87,4 +87,3 @@ main() {
 # Execute main function
 main
 EOF
-chmod +x easy_wireguard.sh
