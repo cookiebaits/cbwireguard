@@ -32,7 +32,9 @@ This wrapper dynamically pulls the latest scripts from GitHub, ensuring your ser
 WireGuard requires root access to modify system network interfaces. Enter `sudo` mode in your terminal:
 
 curl -O [https://raw.githubusercontent.com/cookiebaits/cbwireguard/main/easy_wireguard.sh](https://raw.githubusercontent.com/cookiebaits/cbwireguard/main/easy_wireguard.sh)
+
 chmod +x easy_wireguard.sh
+
 ./easy_wireguard.sh
 
 ```bash
