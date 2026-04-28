@@ -1,3 +1,4 @@
+cat << 'EOF' > cb-wg-ez.sh
 #!/bin/bash
 # Strict mode for maximum stability and security
 set -euo pipefail
@@ -84,3 +85,5 @@ main() {
 
 # Execute main function
 main
+EOF
+chmod +x cb-wg-ez.sh
