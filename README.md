@@ -15,8 +15,8 @@ Download and run script with:
 ```
 curl -O https://github.com/cookiebaits/cbwireguard/cb-wg-ez.sh?raw=true | https://raw.githubusercontent.com/bllizard22/easy-wireguard-server/main/easy_wireguard.sh
 
-chmod +x easy_wireguard.sh
-./easy_wireguard.sh
+chmod +x cb-wg-ez.sh
+./cb-wg-ez.sh
 ```
 
 You will be prompted to pick the action
