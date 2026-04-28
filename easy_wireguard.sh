@@ -1,52 +1,42 @@
-cat << 'EOF' > easy_wireguard.sh
 #!/bin/bash
 # Strict mode for maximum stability and security
 set -euo pipefail
 
-# Define colors
 GREEN='\033[0;32m'
 PURPLE='\033[0;35m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-# Pull dynamically from your cookiebaits repository
 GIT_REPO='https://raw.githubusercontent.com/cookiebaits/cbwireguard/main'
-INSTALL_DIR="/root/easy_wireguard" # Secure location for VPN scripts
+INSTALL_DIR="/root/easy_wireguard" 
 
-# P2: Security Check - WireGuard configuration requires root access.
 if [[ "$EUID" -ne 0 ]]; then
     echo -e "${RED}Security Error: Please run this script as root (sudo).${NC}"
     exit 1
 fi
 
-# P0: Function Priority - Initialize secure environment
 init_environment() {
     if [[ ! -d "$INSTALL_DIR" ]]; then
         mkdir -p "$INSTALL_DIR"
     fi
-    # Restrict read/write/execute access to the root user only
     chmod 700 "$INSTALL_DIR" 
 }
 
-# P1 & P3: Lightweight Fetch & Execute
 fetch_and_run() {
     local script_name="$1"
     local script_path="${INSTALL_DIR}/${script_name}"
 
     echo -e "${GREEN}Fetching latest version of ${script_name}...${NC}"
 
-    # curl flags: -s (silent), -S (show error), -f (fail on HTTP errors like 404), -L (follow redirects)
     if curl -sSfL "${GIT_REPO}/${script_name}" -o "$script_path"; then
         chmod 700 "$script_path"
         "$script_path"
     else
         echo -e "${RED}Error: Failed to pull ${script_name} from ${GIT_REPO}.${NC}"
-        echo -e "${RED}Verify the file exists on your GitHub 'main' branch.${NC}"
         exit 1
     fi
 }
 
-# P0: Function Priority - UI Display
 display_menu() {
     echo -en "${GREEN}Choose the action:
 [1] Setup WireGuard server
@@ -55,17 +45,16 @@ display_menu() {
 [4] Show client (peer) QR
 [5] Create configuration backup
 ${RED}[6] Remove WireGuard server from this system${GREEN}
+[7] List configured clients
 
-[1/2/3/4/5/6]: ${NC}"
+[1/2/3/4/5/6/7]: ${NC}"
 }
 
-# Core Logic Flow
 main() {
     init_environment
     display_menu
     read -r OPTION
 
-    # Secure input handling
     case "$OPTION" in
         1) fetch_and_run "setup_server.sh" ;;
         2) fetch_and_run "restore_backup.sh" ;;
@@ -77,6 +66,7 @@ main() {
             echo -e "${GREEN}Cleaning up environment...${NC}"
             rm -rf "$INSTALL_DIR"
             ;;
+        7) fetch_and_run "list_clients.sh" ;;
         *)
             echo -e "${PURPLE}Exit: The system was not modified.${NC}"
             exit 0
@@ -84,6 +74,4 @@ main() {
     esac
 }
 
-# Execute main function
 main
-EOF
