@@ -82,7 +82,7 @@ MTU = $MTU
 [Peer]
 PublicKey = $SERVER_PUBLIC
 # Stealth Mode: Endpoint should point to the Cloak/Shadowsocks local bridge
-Endpoint = 127.0.0.1:1080 
+Endpoint = 127.0.0.1:1080
 AllowedIPs = $ALLOWED_IPS
 EOF
     echo -e "${PURPLE}Note: Stealth Mode requires ck-client and shadowsocks-rust running on your device.${NC}"

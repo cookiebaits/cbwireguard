@@ -43,7 +43,7 @@ case "$input_VPN_PORT" in
     3) PORT="123" ;;
     4) PORT="80" ;;
     5) PORT="51820" ;;
-    "") 
+    "")
         PORT=$((RANDOM % 60000 + 1025))
         echo -e "${PURPLE}Selected random port: ${PORT}${NC}"
         ;;
@@ -74,11 +74,6 @@ fi
 SERVER_PRIVATE_IP="10.18.0.1"
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
-# P1: Ensure latest WireGuard versions on Ubuntu
-if [[ "$distro" == "ubuntu" ]]; then
-    apt-get install -y software-properties-common
-    add-apt-repository -y ppa:wireguard/wireguard
-fi
 apt-get update -y
 apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2
 
