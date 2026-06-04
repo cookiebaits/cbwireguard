@@ -6,6 +6,17 @@ PURPLE='\033[0;35m'
 RED='\033[0;31m'
 NC='\033[0m'
 
+SETTINGS_FILE="settings.conf"
+if [[ -f "$SETTINGS_FILE" ]]; then
+    # shellcheck source=/dev/null
+    source "$SETTINGS_FILE"
+fi
+
+# P3: Defaults from settings
+MTU=${DEFAULT_MTU:-1280}
+DNS=${DEFAULT_DNS:-"94.140.14.49, 9.9.9.9, 94.140.14.59"}
+ALLOWED_IPS=${DEFAULT_ALLOWED_IPS:-"0.0.0.0/1, 128.0.0.0/1"}
+
 if [[ "$EUID" -ne 0 ]]; then
     echo -e "${RED}Security Error: Please run this script as root (sudo).${NC}"
     exit 1
@@ -37,6 +48,9 @@ SERVER_PUBLIC=$(cat /etc/wireguard/server_public.key)
 
 IP_ADR=$(curl -4 -s ifconfig.me || dig +short myip.opendns.com @resolver1.opendns.com || echo "UNKNOWN_IP")
 PORT=$(grep -i "^ListenPort" /etc/wireguard/wg0.conf | awk '{print $3}')
+# P3: Respect MTU from server config if it exists
+SERVER_MTU=$(grep -i "^MTU" /etc/wireguard/wg0.conf | awk '{print $3}' || echo "$MTU")
+MTU=${SERVER_MTU:-$MTU}
 IP_PORT="$IP_ADR:$PORT"
 
 SERVER_PRIVATE_IP_PREFIX="10.18.0"
@@ -56,13 +70,13 @@ cat <<EOF > "$CLIENT_CONF"
 [Interface]
 PrivateKey = $DEVICE_PRIVATE
 Address = $CLIENT_IP/32
-DNS = 1.1.1.1, 8.8.8.8, 9.9.9.9, 76.76.19.19, 94.140.14.14, 208.67.222.222
-MTU = 1360
+DNS = $DNS
+MTU = $MTU
 
 [Peer]
 PublicKey = $SERVER_PUBLIC
 Endpoint = $IP_PORT
-AllowedIPs = 0.0.0.0/0
+AllowedIPs = $ALLOWED_IPS
 EOF
 
 chmod 600 "$CLIENT_CONF"
