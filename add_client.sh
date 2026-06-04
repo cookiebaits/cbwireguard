@@ -36,6 +36,9 @@ if [[ -z "$DEVICE_NAME" ]]; then
     exit 1
 fi
 
+echo -en "${GREEN}Enable Stealth Mode (WireGuard over Cloak) [y/n]? ${NC}"
+read -r STEALTH_MODE
+
 echo -en "${GREEN}Is QR-code suitable for output [y/n]? ${NC}"
 read -r IS_QRCODE
 
@@ -66,7 +69,25 @@ CLIENT_IP="$SERVER_PRIVATE_IP_PREFIX.$NEXT_IP"
 
 CLIENT_CONF="/etc/wireguard/clients/$DEVICE_NAME.conf"
 
-cat <<EOF > "$CLIENT_CONF"
+if [[ "$STEALTH_MODE" =~ ^[Yy]$ ]]; then
+    # P2: Advanced Stealth - WireGuard over Cloak (via Shadowsocks)
+    # This requires ck-client and a shadowsocks-rust client configured on the user device
+    cat <<EOF > "$CLIENT_CONF"
+[Interface]
+PrivateKey = $DEVICE_PRIVATE
+Address = $CLIENT_IP/32
+DNS = $DNS
+MTU = $MTU
+
+[Peer]
+PublicKey = $SERVER_PUBLIC
+# Stealth Mode: Endpoint should point to the Cloak/Shadowsocks local bridge
+Endpoint = 127.0.0.1:1080
+AllowedIPs = $ALLOWED_IPS
+EOF
+    echo -e "${PURPLE}Note: Stealth Mode requires ck-client and shadowsocks-rust running on your device.${NC}"
+else
+    cat <<EOF > "$CLIENT_CONF"
 [Interface]
 PrivateKey = $DEVICE_PRIVATE
 Address = $CLIENT_IP/32
@@ -78,6 +99,7 @@ PublicKey = $SERVER_PUBLIC
 Endpoint = $IP_PORT
 AllowedIPs = $ALLOWED_IPS
 EOF
+fi
 
 chmod 600 "$CLIENT_CONF"
 
