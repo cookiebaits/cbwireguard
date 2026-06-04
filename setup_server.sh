@@ -1,6 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
+# P1: OS Detection to fix unbound 'distro' variable
+if [[ -f /etc/os-release ]]; then
+    source /etc/os-release
+    distro=$ID
+else
+    distro="unknown"
+fi
+
 GREEN='\033[0;32m'
 PURPLE='\033[0;35m'
 RED='\033[0;31m'
@@ -20,15 +28,34 @@ if [[ "$EUID" -ne 0 ]]; then
     exit 1
 fi
 
-echo -en "${GREEN}Choose port for VPN (1024-65535), leave blank for random: ${NC}"
+echo -e "${GREEN}Choose port for VPN (Top 5 Stealthiest):${NC}"
+echo "[1] 443 (HTTPS/QUIC - Most Stealthy)"
+echo "[2] 53 (DNS)"
+echo "[3] 123 (NTP)"
+echo "[4] 80 (HTTP)"
+echo "[5] 51820 (WireGuard Default)"
+echo -en "${PURPLE}Select option [1-5] or enter custom port: ${NC}"
 read -r input_VPN_PORT
 
-if [[ -z "$input_VPN_PORT" ]]; then
-    PORT=$((RANDOM % 60000 + 1025))
-    echo -e "${PURPLE}Selected random port: ${PORT}${NC}"
-else
-    PORT="$input_VPN_PORT"
-fi
+case "$input_VPN_PORT" in
+    1) PORT="443" ;;
+    2) PORT="53" ;;
+    3) PORT="123" ;;
+    4) PORT="80" ;;
+    5) PORT="51820" ;;
+    "") 
+        PORT=$((RANDOM % 60000 + 1025))
+        echo -e "${PURPLE}Selected random port: ${PORT}${NC}"
+        ;;
+    *)
+        if [[ "$input_VPN_PORT" =~ ^[0-9]+$ ]]; then
+            PORT="$input_VPN_PORT"
+        else
+            PORT="443"
+            echo -e "${RED}Invalid input. Defaulting to 443.${NC}"
+        fi
+        ;;
+esac
 
 echo -en "${GREEN}Enter your SSH port, leave blank for default [22]: ${NC}"
 read -r input_SSH_PORT
