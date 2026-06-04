@@ -47,6 +47,11 @@ fi
 SERVER_PRIVATE_IP="10.18.0.1"
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
+# P1: Ensure latest WireGuard versions on Ubuntu
+if [[ "$distro" == "ubuntu" ]]; then
+    apt-get install -y software-properties-common
+    add-apt-repository -y ppa:wireguard/wireguard
+fi
 apt-get update -y
 apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2
 
@@ -88,6 +93,9 @@ sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
 echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
 echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
 echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+# P2: Harden network stack
+echo "net.ipv4.conf.all.rp_filter=1" >> /etc/sysctl.conf
+echo "net.ipv4.conf.default.rp_filter=1" >> /etc/sysctl.conf
 sysctl -p
 
 echo -e "${GREEN}Configuring UFW Firewall...${NC}"

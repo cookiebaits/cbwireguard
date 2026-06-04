@@ -21,26 +21,25 @@ This wrapper dynamically pulls the latest scripts from GitHub, ensuring your ser
 
 - **Enhanced Stealth & Bypassing:** Dynamically configure MTU, DNS, and AllowedIPs (split-tunneling) to bypass streaming service detection and restrictive firewalls.
 - **Integrated Cloak Plugin:** One-click installation of Cloak + Shadowsocks for a powerful secondary stealth layer.
+- **Domain-Based Split Tunneling:** Bypass specific domains from the VPN tunnel in real-time.
 - **Maximized Throughput:** Injects Kernel-level BBR (Bottleneck Bandwidth and RTT) and FQ queueing, paired with an optimized default MTU (1280) to eliminate packet fragmentation and maximize speeds.
 - **Zero-Downtime Hot Reloading:** Adding a new peer instantly injects them into the live server. Existing users are never disconnected when the configuration updates.
 - **Military-Grade Security:** Enforces strict execution rules (`set -euo pipefail`), root-only directory locks (`chmod 700`), and secure unprivileged port generation.
+- **Encrypted Backups:** All backups are now AES-256 encrypted using OpenSSL.
 - **Smart IP Tracking:** Intelligently scans the server to dynamically assign IP addresses, preventing crashes from corrupted or empty lines.
 - **Unified Backup Manager:** Securely create, list, restore, and destroy server backups from a single interactive menu.
 
 ---
 
-## 🛠️ Installation (Step 1)
+## 🚀 Quick Installation
 
-WireGuard requires root access to modify system network interfaces. Enter `sudo` mode in your terminal:
-
-curl -O https://raw.githubusercontent.com/cookiebaits/cbwireguard/main/easy_wireguard.sh
-
-chmod +x easy_wireguard.sh
-
-./easy_wireguard.sh
+Run this single command to download and launch the installer:
 
 ```bash
-sudo -i
+curl -sSfL https://raw.githubusercontent.com/cookiebaits/cbwireguard/main/easy_wireguard.sh -o easy_wireguard.sh && chmod +x easy_wireguard.sh && sudo ./easy_wireguard.sh
+```
+
+---
 
 ## ⚙️ Step 2: Setting up the Server (Option 1)
 The script will ask you to define your ports:
@@ -68,13 +67,13 @@ The script will generate the .conf file and inject the user into the active serv
 ## 💾 Step 5: Backup & Restore Manager (Option 5)
 Selecting this opens the dedicated Backup Sub-Menu:
 
-Create: Archives your current /etc/wireguard configurations into a locked (chmod 600) .tar.gz file stamped with the date, time, and hostname.
+Create: Archives your current /etc/wireguard configurations into an **AES-256 encrypted** (chmod 600) .tar.gz.enc file.
 
-Restore: Scans the directory for existing backups and allows you to select which one to restore. It safely handles extraction in an isolated memory space.
+Restore: Scans the directory for existing backups, prompts for the password, and restores the configuration.
 
 List: Shows all backups currently sitting in your directory and their file sizes.
 
-Delete: Securely destroys old, unencrypted backup archives to keep your server secure.
+Delete: Securely destroys backup archives to keep your server secure.
 
 ## 🕵️ Step 6: Cloak Stealth Plugin (Option 6)
 Integrate Cloak with Shadowsocks-Rust to provide an additional layer of obfuscation. This tunnels your VPN traffic inside what appears to be standard HTTPS traffic, making it nearly impossible to detect via Deep Packet Inspection (DPI).

@@ -169,6 +169,7 @@ function DownloadAndInstallSSRust() {
     "server":"127.0.0.1",
     "server_port":$SS_PORT,
     "password":"$Password",
+    "mode":"tcp_and_udp",
     "timeout":60,
     "method":"$cipher",
     "ipv6_first":true,
@@ -190,6 +191,11 @@ User=root
 LimitNOFILE=32768
 ExecStart=/usr/bin/ssserver -c config.json
 WorkingDirectory=/etc/shadowsocks-rust
+# Hardening
+ProtectSystem=full
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectHome=true
 
 [Install]
 WantedBy=multi-user.target
@@ -377,6 +383,11 @@ User=root
 LimitNOFILE=32768
 ExecStart=/usr/bin/ck-server -c ckserver.json
 WorkingDirectory=/etc/cloak
+# Hardening
+ProtectSystem=full
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectHome=true
 
 [Install]
 WantedBy=multi-user.target
