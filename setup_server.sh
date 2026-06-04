@@ -6,6 +6,15 @@ PURPLE='\033[0;35m'
 RED='\033[0;31m'
 NC='\033[0m'
 
+SETTINGS_FILE="settings.conf"
+if [[ -f "$SETTINGS_FILE" ]]; then
+    # shellcheck source=/dev/null
+    source "$SETTINGS_FILE"
+fi
+
+# P3: Default MTU from settings or 1280
+MTU=${DEFAULT_MTU:-1280}
+
 if [[ "$EUID" -ne 0 ]]; then
     echo -e "${RED}Security Error: Please run this script as root (sudo).${NC}"
     exit 1
@@ -27,6 +36,12 @@ if [[ -z "$input_SSH_PORT" ]]; then
     SSH_PORT="22"
 else
     SSH_PORT="$input_SSH_PORT"
+fi
+
+echo -en "${GREEN}Enter MTU, leave blank for default [${MTU}]: ${NC}"
+read -r input_MTU
+if [[ -n "$input_MTU" ]]; then
+    MTU="$input_MTU"
 fi
 
 SERVER_PRIVATE_IP="10.18.0.1"
@@ -54,7 +69,7 @@ cat <<EOF > /etc/wireguard/wg0.conf
 PrivateKey = $SERVER_PRIVATE
 Address = $SERVER_PRIVATE_IP/24
 ListenPort = $PORT
-MTU = 1360
+MTU = $MTU
 SaveConfig = false
 
 PostUp = ufw route allow in on wg0 out on $NETWORK_DEVICE

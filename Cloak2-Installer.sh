@@ -1,4 +1,3 @@
-cat << 'EOF' > Cloak2-Installer.sh
 #!/bin/bash
 # Strict error handling, but allowing unbound variables for the interactive menu
 set -eo pipefail
@@ -399,5 +398,3 @@ if [[ "$SHADOWSOCKS" == true ]]; then
 fi
 
 echo -e "${GREEN}Installation Complete!${NC}"
-EOF
-chmod +x Cloak2-Installer.sh
