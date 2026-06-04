@@ -288,14 +288,35 @@ clear
 echo -e "${PURPLE}Cloak + Shadowsocks Secure Installer${NC}"
 echo
 
-read -r -p "Please enter a port to listen on (443 recommended, -1 for random): " -e -i 443 PORT
-if [[ $PORT -eq -1 ]]; then 
-    GetRandomPort PORT
-    echo "Selected port: $PORT"
-fi
+echo -e "${GREEN}Choose Cloak Listening Port:${NC}"
+echo "[1] 443 (HTTPS - Recommended)"
+echo "[2] 80 (HTTP)"
+echo "[3] 8443 (Alt-HTTPS)"
+echo -en "${PURPLE}Select option [1-3] or enter custom port: ${NC}"
+read -r input_PORT
 
-read -r -p "Redirection IP and port for Cloak (leave blank for bing.com 204.79.197.200:443): " ckwebaddr
-[ -z "$ckwebaddr" ] && ckwebaddr="204.79.197.200:443"
+case "$input_PORT" in
+    1) PORT="443" ;;
+    2) PORT="80" ;;
+    3) PORT="8443" ;;
+    "") PORT="443" ;;
+    *) PORT="$input_PORT" ;;
+esac
+
+echo -e "\n${GREEN}Choose Cloak Redirection IP/Domain:${NC}"
+echo "[1] bing.com (150.171.27.10:443 - Recommended)"
+echo "[2] google.com (173.194.193.102:443)"
+echo "[3] cloudflare.com (104.16.133.229:443)"
+echo -en "${PURPLE}Select option [1-3] or enter custom IP:PORT : ${NC}"
+read -r input_REDIR
+
+case "$input_REDIR" in
+    1) ckwebaddr="150.171.27.10:443" ;;
+    2) ckwebaddr="173.194.193.102:443" ;;
+    3) ckwebaddr="104.16.133.229:443" ;;
+    "") ckwebaddr="150.171.27.10:443" ;;
+    *) ckwebaddr="$input_REDIR" ;;
+esac
 
 GetArch
 declare -A proxyBook
