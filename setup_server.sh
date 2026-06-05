@@ -28,6 +28,14 @@ if [[ "$EUID" -ne 0 ]]; then
     exit 1
 fi
 
+check_port_usage() {
+    local port=$1
+    if ss -lnup | grep -q ":${port} "; then
+        return 0 # Port is in use
+    fi
+    return 1 # Port is free
+}
+
 echo -e "${GREEN}Choose port for VPN (Top 5 Stealthiest):${NC}"
 echo "[1] 443 (HTTPS/QUIC - Most Stealthy)"
 echo "[2] 53 (DNS)"
@@ -37,25 +45,35 @@ echo "[5] 51820 (WireGuard Default)"
 echo -en "${PURPLE}Select option [1-5] or enter custom port: ${NC}"
 read -r input_VPN_PORT
 
-case "$input_VPN_PORT" in
-    1) PORT="443" ;;
-    2) PORT="53" ;;
-    3) PORT="123" ;;
-    4) PORT="80" ;;
-    5) PORT="51820" ;;
-    "") 
-        PORT=$((RANDOM % 60000 + 1025))
-        echo -e "${PURPLE}Selected random port: ${PORT}${NC}"
-        ;;
-    *)
-        if [[ "$input_VPN_PORT" =~ ^[0-9]+$ ]]; then
-            PORT="$input_VPN_PORT"
-        else
-            PORT="443"
-            echo -e "${RED}Invalid input. Defaulting to 443.${NC}"
-        fi
-        ;;
-esac
+while true; do
+    case "$input_VPN_PORT" in
+        1) PORT="443" ;;
+        2) PORT="53" ;;
+        3) PORT="123" ;;
+        4) PORT="80" ;;
+        5) PORT="51820" ;;
+        "") 
+            PORT=$((RANDOM % 60000 + 1025))
+            echo -e "${PURPLE}Selected random port: ${PORT}${NC}"
+            ;;
+        *)
+            if [[ "$input_VPN_PORT" =~ ^[0-9]+$ ]]; then
+                PORT="$input_VPN_PORT"
+            else
+                PORT="443"
+                echo -e "${RED}Invalid input. Defaulting to 443.${NC}"
+            fi
+            ;;
+    esac
+
+    if check_port_usage "$PORT"; then
+        echo -e "${RED}Error: Port ${PORT} is already in use by another process!${NC}"
+        echo -en "${GREEN}Please enter another port or select from the menu above: ${NC}"
+        read -r input_VPN_PORT
+    else
+        break
+    fi
+done
 
 echo -en "${GREEN}Enter your SSH port, leave blank for default [22]: ${NC}"
 read -r input_SSH_PORT
@@ -100,7 +118,7 @@ MTU = $MTU
 SaveConfig = false
 
 PostUp = ufw route allow in on wg0 out on $NETWORK_DEVICE
-PostUp = iptables -t nat -I POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
+PostUp = iptables -t nat -A POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
 PreDown = ufw route delete allow in on wg0 out on $NETWORK_DEVICE
 PreDown = iptables -t nat -D POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
 EOF
@@ -127,7 +145,14 @@ ufw --force enable
 
 echo -e "${GREEN}Starting WireGuard service...${NC}"
 systemctl enable wg-quick@wg0.service
-systemctl restart wg-quick@wg0.service
+if ! systemctl restart wg-quick@wg0.service; then
+    echo -e "${RED}Error: Failed to start WireGuard service.${NC}"
+    echo -e "${PURPLE}--- Diagnostic Logs ---${NC}"
+    journalctl -xeu wg-quick@wg0.service | tail -n 20
+    echo -e "${PURPLE}-----------------------${NC}"
+    systemctl status wg-quick@wg0.service --no-pager
+    exit 1
+fi
 systemctl status --no-pager -l wg-quick@wg0.service
 
 echo -e "\n${PURPLE}======================================================${NC}"
