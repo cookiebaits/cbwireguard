@@ -14,7 +14,7 @@ PURPLE='\033[0;35m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-SETTINGS_FILE="settings.conf"
+SETTINGS_FILE="/root/easy_wireguard/settings.conf"
 if [[ -f "$SETTINGS_FILE" ]]; then
     # shellcheck source=/dev/null
     source "$SETTINGS_FILE"
@@ -36,13 +36,14 @@ check_port_usage() {
     return 1 # Port is free
 }
 
-echo -e "${GREEN}Choose port for VPN (Top 5 Stealthiest):${NC}"
+echo -e "${GREEN}Choose port for VPN (Recommended Stealthy Ports):${NC}"
 echo "[1] 443 (HTTPS/QUIC - Most Stealthy)"
 echo "[2] 53 (DNS)"
 echo "[3] 123 (NTP)"
-echo "[4] 80 (HTTP)"
-echo "[5] 51820 (WireGuard Default)"
-echo -en "${PURPLE}Select option [1-5] or enter custom port: ${NC}"
+echo "[4] 1194 (OpenVPN UDP)"
+echo "[5] 500 (ISAKMP)"
+echo "[6] 4500 (IPsec NAT-T)"
+echo -en "${PURPLE}Select option [1-6] or enter custom port [Default 443]: ${NC}"
 read -r input_VPN_PORT
 
 while true; do
@@ -50,12 +51,10 @@ while true; do
         1) PORT="443" ;;
         2) PORT="53" ;;
         3) PORT="123" ;;
-        4) PORT="80" ;;
-        5) PORT="51820" ;;
-        "") 
-            PORT=$((RANDOM % 60000 + 1025))
-            echo -e "${PURPLE}Selected random port: ${PORT}${NC}"
-            ;;
+        4) PORT="1194" ;;
+        5) PORT="500" ;;
+        6) PORT="4500" ;;
+    "") PORT="443" ;;
         *)
             if [[ "$input_VPN_PORT" =~ ^[0-9]+$ ]]; then
                 PORT="$input_VPN_PORT"
@@ -93,7 +92,7 @@ SERVER_PRIVATE_IP="10.18.0.1"
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
 apt-get update -y
-apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2
+apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq
 
 echo -e "${GREEN}Generating secure encryption keys...${NC}"
 mkdir -p /etc/wireguard

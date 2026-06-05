@@ -6,7 +6,7 @@ PURPLE='\033[0;35m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-SETTINGS_FILE="settings.conf"
+SETTINGS_FILE="/root/easy_wireguard/settings.conf"
 if [[ -f "$SETTINGS_FILE" ]]; then
     # shellcheck source=/dev/null
     source "$SETTINGS_FILE"
@@ -38,6 +38,27 @@ fi
 
 echo -en "${GREEN}Enable Stealth Mode (WireGuard over Cloak) [y/n]? ${NC}"
 read -r STEALTH_MODE
+
+if [[ "$STEALTH_MODE" =~ ^[Yy]$ ]]; then
+    if [[ ! -d "/etc/cloak" ]]; then
+        echo -e "${PURPLE}Stealth layer (Cloak) is not installed.${NC}"
+        echo -en "${GREEN}Would you like to install it now? [y/n]: ${NC}"
+        read -r install_cloak
+        if [[ "$install_cloak" =~ ^[Yy]$ ]]; then
+            # P2: Ensure Cloak installation works
+            if [[ -f "./Cloak2-Installer.sh" ]]; then
+                chmod +x ./Cloak2-Installer.sh
+                ./Cloak2-Installer.sh
+            else
+                echo -e "${RED}Error: Cloak2-Installer.sh not found in current directory.${NC}"
+                exit 1
+            fi
+        else
+            echo -e "${RED}Stealth Mode requires Cloak. Proceeding without Stealth Mode...${NC}"
+            STEALTH_MODE="n"
+        fi
+    fi
+fi
 
 echo -en "${GREEN}Is QR-code suitable for output [y/n]? ${NC}"
 read -r IS_QRCODE
@@ -72,20 +93,33 @@ CLIENT_CONF="/etc/wireguard/clients/$DEVICE_NAME.conf"
 if [[ "$STEALTH_MODE" =~ ^[Yy]$ ]]; then
     # P2: Advanced Stealth - WireGuard over Cloak (via Shadowsocks)
     # This requires ck-client and a shadowsocks-rust client configured on the user device
+    
+    # Collect connection info for instructions
+    ck_port=$(grep "^PORT=" /etc/cloak/ckport.txt | cut -d= -f2 || echo "443")
+    ck_uid=$(grep "^ckaauid=" /etc/cloak/ckport.txt | cut -d= -f2 | tr -d '"' || echo "UID")
+    ss_pass=$(jq -r '.password' /etc/shadowsocks-rust/config.json || echo "PASSWORD")
+
     cat <<EOF > "$CLIENT_CONF"
 [Interface]
 PrivateKey = $DEVICE_PRIVATE
 Address = $CLIENT_IP/32
 DNS = $DNS
-MTU = $MTU
+MTU = 1280
 
 [Peer]
 PublicKey = $SERVER_PUBLIC
-# Stealth Mode: Endpoint should point to the Cloak/Shadowsocks local bridge
-Endpoint = 127.0.0.1:1080 
+Endpoint = $IP_ADR:$PORT
 AllowedIPs = $ALLOWED_IPS
 EOF
-    echo -e "${PURPLE}Note: Stealth Mode requires ck-client and shadowsocks-rust running on your device.${NC}"
+    echo -e "${PURPLE}======================================================${NC}"
+    echo -e "${GREEN}Stealth Mode Instructions (Advanced Obfuscation):${NC}"
+    echo -e "${PURPLE}By default, this config points to the Server IP for standard use.${NC}"
+    echo -e "To enable ${GREEN}Shadowsocks + Cloak${NC} obfuscation (to bypass detection):"
+    echo -e "1. Change the ${GREEN}Endpoint${NC} in your WireGuard app to ${PURPLE}127.0.0.1:1080${NC}"
+    echo -e "2. Run Cloak client on your device: ${PURPLE}ck-client -s $IP_ADR -p $ck_port -a $ck_uid -l 1984 -c ckclient.json &${NC}"
+    echo -e "3. Run Shadowsocks client on your device: ${PURPLE}ss-local -s 127.0.0.1 -p 1984 -l 1080 -k $ss_pass -m aes-256-gcm &${NC}"
+    echo -e "${PURPLE}Note: Windows/Mobile users can use the Cloak plugin inside their Shadowsocks client.${NC}"
+    echo -e "${PURPLE}======================================================${NC}"
 else
     cat <<EOF > "$CLIENT_CONF"
 [Interface]
@@ -106,12 +140,29 @@ chmod 600 "$CLIENT_CONF"
 cat <<EOF >> /etc/wireguard/wg0.conf
 
 [Peer]
-# $DEVICE_NAME
+# USER_START: $DEVICE_NAME
 PublicKey = $DEVICE_PUBLIC
 AllowedIPs = $CLIENT_IP/32
+# USER_END: $DEVICE_NAME
 EOF
 
 wg set wg0 peer "$DEVICE_PUBLIC" allowed-ips "$CLIENT_IP/32"
+
+# P3: Encryption of client config
+get_master_pass() {
+    if [[ -z "${MASTER_PASS:-}" ]]; then
+        echo -en "${GREEN}Enter Master Password for Client Encryption: ${NC}"
+        read -rs MASTER_PASS
+        echo
+        export MASTER_PASS
+    fi
+}
+
+encrypt_config() {
+    get_master_pass
+    openssl enc -aes-256-cbc -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "$CLIENT_CONF" -out "${CLIENT_CONF}.enc"
+    # Keep the plain text for the current display, then delete
+}
 
 if [[ "$IS_QRCODE" == "y" || -z "$IS_QRCODE" ]]; then
     if ! command -v qrencode &> /dev/null; then
@@ -124,3 +175,6 @@ else
     cat "$CLIENT_CONF"
     echo -e "${NC}"
 fi
+
+encrypt_config
+rm -f "$CLIENT_CONF"
