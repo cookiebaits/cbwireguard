@@ -6,7 +6,7 @@ PURPLE='\033[0;35m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-SETTINGS_FILE="settings.conf"
+SETTINGS_FILE="/root/easy_wireguard/settings.conf"
 if [[ -f "$SETTINGS_FILE" ]]; then
     # shellcheck source=/dev/null
     source "$SETTINGS_FILE"
@@ -85,7 +85,14 @@ PublicKey = $SERVER_PUBLIC
 Endpoint = 127.0.0.1:1080
 AllowedIPs = $ALLOWED_IPS
 EOF
-    echo -e "${PURPLE}Note: Stealth Mode requires ck-client and shadowsocks-rust running on your device.${NC}"
+    echo -e "${PURPLE}======================================================${NC}"
+    echo -e "${GREEN}Stealth Mode Configured!${NC}"
+    echo -e "${PURPLE}To connect from your client device:${NC}"
+    echo -e "1. Install ${GREEN}ck-client${NC} and ${GREEN}shadowsocks-rust${NC} (ss-local)."
+    echo -e "2. Run Cloak client: ${PURPLE}ck-client -s SERVER_IP -p $PORT -a ADMIN_UID -l 1984 -c ckclient.json &${NC}"
+    echo -e "3. Run Shadowsocks: ${PURPLE}ss-local -s 127.0.0.1 -p 1984 -l 1080 -k PASSWORD -m aes-256-gcm &${NC}"
+    echo -e "4. Import the generated WireGuard config and connect."
+    echo -e "${PURPLE}======================================================${NC}"
 else
     cat <<EOF > "$CLIENT_CONF"
 [Interface]

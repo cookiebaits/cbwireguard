@@ -7,6 +7,7 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 BYPASS_FILE="/etc/wireguard/bypass_domains.txt"
+SETTINGS_FILE="/root/easy_wireguard/settings.conf"
 
 if [[ "$EUID" -ne 0 ]]; then
     echo -e "${RED}Security Error: Please run this script as root (sudo).${NC}"

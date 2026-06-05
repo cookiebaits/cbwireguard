@@ -15,19 +15,22 @@ if [[ "$EUID" -ne 0 ]]; then
 fi
 
 # Clean OS Detection
-source /etc/os-release
-distro=$ID
+if [[ -f /etc/os-release ]]; then
+    source /etc/os-release
+    distro=$ID
+else
+    distro="unknown"
+fi
+
+# P1 Fix: Install dependencies early to prevent hangs during port verification
+if [[ "$distro" =~ (ubuntu|debian|raspbian) ]]; then
+    echo -e "${GREEN}Updating package lists and installing core dependencies...${NC}"
+    apt-get update -y
+    apt-get -y install wget jq curl xz-utils iptables lsof openssl qrencode
+fi
 
 function GetRandomPort() {
     local __resultvar=$1
-    if ! command -v lsof >/dev/null 2>&1; then
-        echo -e "${GREEN}Installing lsof for port verification...${NC}"
-        if [[ "$distro" =~ (centos|rhel|fedora) ]]; then
-            yum -y -q install lsof
-        elif [[ "$distro" =~ (ubuntu|debian|raspbian) ]]; then
-            apt-get -y install lsof >/dev/null
-        fi
-    fi
     local PORTL
     while true; do
         PORTL=$((RANDOM % 16383 + 49152))
@@ -337,10 +340,7 @@ if [[ "$OPTION" =~ ^[Yy]$ ]]; then
     proxyBook+=(["shadowsocks"]="t127.0.0.1:$SS_PORT")
 fi
 
-if [[ "$distro" =~ (ubuntu|debian|raspbian) ]]; then
-    apt-get update -y >/dev/null
-    apt-get -y install wget jq curl xz-utils iptables
-fi
+# Dependencies already installed above
 
 DownloadCloak
 

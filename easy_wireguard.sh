@@ -9,7 +9,25 @@ NC='\033[0m'
 
 GIT_REPO='https://raw.githubusercontent.com/cookiebaits/cbwireguard/main'
 INSTALL_DIR="/root/easy_wireguard" 
-SETTINGS_FILE="settings.conf"
+SETTINGS_FILE="${INSTALL_DIR}/settings.conf"
+
+init_environment() {
+    if [[ ! -d "$INSTALL_DIR" ]]; then
+        mkdir -p "$INSTALL_DIR"
+    fi
+    chmod 700 "$INSTALL_DIR"
+
+    if [[ ! -f "$SETTINGS_FILE" ]]; then
+        cat <<EOF > "$SETTINGS_FILE"
+DEFAULT_MTU=1280
+DEFAULT_DNS="94.140.14.49, 9.9.9.9, 94.140.14.59"
+DEFAULT_ALLOWED_IPS="0.0.0.0/1, 128.0.0.0/1"
+EOF
+        chmod 600 "$SETTINGS_FILE"
+    fi
+}
+
+init_environment
 
 if [[ -f "$SETTINGS_FILE" ]]; then
     # shellcheck source=/dev/null
@@ -112,9 +130,12 @@ settings_menu() {
 }
 
 main() {
-    init_environment
     # Loop the main menu so it returns after completing a task
     while true; do
+        clear
+        echo -e "${PURPLE}======================================================${NC}"
+        echo -e "${GREEN}       🍪 Cookie's Easy WireGuard Manager${NC}"
+        echo -e "${PURPLE}======================================================${NC}"
         display_menu
         read -r OPTION
 
