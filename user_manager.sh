@@ -149,13 +149,41 @@ edit_user() {
     fi
 }
 
-# Main Menu
+show_user_by_name() {
+    local username="$1"
+    local file="${CLIENT_DIR}/${username}.conf.enc"
+
+    if [[ -f "$file" ]]; then
+        local content
+        content=$(decrypt_file_to_stdout "$file")
+        if [[ "$content" == "FAILED" ]]; then
+            echo -e "${RED}Error: Decryption failed. Incorrect master password?${NC}"
+        else
+            echo -e "${PURPLE}--- Configuration for $username ---${NC}"
+            echo "$content"
+            echo -e "${PURPLE}-----------------------------------${NC}"
+            if command -v qrencode &> /dev/null; then
+                echo -e "${GREEN}QR Code:${NC}"
+                echo "$content" | qrencode -t ansiutf8
+            fi
+        fi
+    else
+        echo -e "${RED}User not found.${NC}"
+    fi
+}
+
+# Main Menu logic or CLI arg
+if [[ "${1:-}" == "--show" && -n "${2:-}" ]]; then
+    show_user_by_name "$2"
+    exit 0
+fi
+
 while true; do
-    echo -e "\n${PURPLE}--- User Management ---${NC}"
+    echo -e "\n${PURPLE}--- User Management (Configure Clients) ---${NC}"
     echo "[1] List users"
-    echo "[2] Show user (Text/QR)"
-    echo "[3] Edit user"
-    echo "${RED}[4] Delete user${NC}"
+    echo "[2] Check configuration (Show QR/Text)"
+    echo "[3] Edit configuration"
+    echo "${RED}[4] Remove user (Delete)${NC}"
     echo "[0] Back to Main Menu"
     echo -en "${GREEN}Option: ${NC}"
     read -r opt

@@ -104,21 +104,21 @@ if [[ "$STEALTH_MODE" =~ ^[Yy]$ ]]; then
 PrivateKey = $DEVICE_PRIVATE
 Address = $CLIENT_IP/32
 DNS = $DNS
-MTU = $MTU
+MTU = 1280
 
 [Peer]
 PublicKey = $SERVER_PUBLIC
-# Stealth Mode: Endpoint should point to the Cloak/Shadowsocks local bridge
-Endpoint = 127.0.0.1:1080
+Endpoint = $IP_ADR:$PORT
 AllowedIPs = $ALLOWED_IPS
 EOF
     echo -e "${PURPLE}======================================================${NC}"
-    echo -e "${GREEN}Stealth Mode Configured!${NC}"
-    echo -e "${PURPLE}To connect from your client device:${NC}"
-    echo -e "1. Install ${GREEN}ck-client${NC} and ${GREEN}shadowsocks-rust${NC} (ss-local)."
-    echo -e "2. Run Cloak client: ${PURPLE}ck-client -s $IP_ADR -p $ck_port -a $ck_uid -l 1984 -c ckclient.json &${NC}"
-    echo -e "3. Run Shadowsocks: ${PURPLE}ss-local -s 127.0.0.1 -p 1984 -l 1080 -k $ss_pass -m aes-256-gcm &${NC}"
-    echo -e "4. Import the generated WireGuard config and connect."
+    echo -e "${GREEN}Stealth Mode Instructions (Advanced Obfuscation):${NC}"
+    echo -e "${PURPLE}By default, this config points to the Server IP for standard use.${NC}"
+    echo -e "To enable ${GREEN}Shadowsocks + Cloak${NC} obfuscation (to bypass detection):"
+    echo -e "1. Change the ${GREEN}Endpoint${NC} in your WireGuard app to ${PURPLE}127.0.0.1:1080${NC}"
+    echo -e "2. Run Cloak client on your device: ${PURPLE}ck-client -s $IP_ADR -p $ck_port -a $ck_uid -l 1984 -c ckclient.json &${NC}"
+    echo -e "3. Run Shadowsocks client on your device: ${PURPLE}ss-local -s 127.0.0.1 -p 1984 -l 1080 -k $ss_pass -m aes-256-gcm &${NC}"
+    echo -e "${PURPLE}Note: Windows/Mobile users can use the Cloak plugin inside their Shadowsocks client.${NC}"
     echo -e "${PURPLE}======================================================${NC}"
 else
     cat <<EOF > "$CLIENT_CONF"

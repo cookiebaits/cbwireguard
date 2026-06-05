@@ -82,10 +82,11 @@ display_menu() {
     echo -en "\n${GREEN}Choose the action:
 [1] Setup WireGuard server
 [2] Add new client (peer)
-[3] User Management (Check, Delete, Edit)
-[4] Backup & Restore Manager
-[5] Domain-Based Split Tunneling
-[6] Install/Manage Cloak (Stealth Plugin)
+[3] Show client (peer) QR
+[4] Configure clients (Check/Edit/Remove)
+[5] Backup & Restore Manager
+[6] Domain-Based Split Tunneling
+[7] Install/Manage Cloak (Stealth Plugin)
 [s] Settings (MTU, DNS, AllowedIPs)
 ${RED}[r] Remove WireGuard server from this system${GREEN}
 [q] Exit
@@ -140,10 +141,20 @@ main() {
         case "$OPTION" in
             1) fetch_and_run "setup_server.sh" ;;
             2) fetch_and_run "add_client.sh" ;;
-            3) fetch_and_run "user_manager.sh" ;;
-            4) fetch_and_run "backup_manager.sh" ;;
-            5) fetch_and_run "domain_bypass.sh" ;;
-            6) fetch_and_run "Cloak2-Installer.sh" ;;
+            3)
+                echo -en "${GREEN}Enter device name to show QR: ${NC}"
+                read -r dname
+                # We can reuse user_manager.sh logic or just call a small snippet
+                # For now, let's keep it simple and maybe restore show_qr.sh if needed
+                # or just use user_manager.sh with a flag.
+                # Actually, user_manager.sh has show_user.
+                # Let's just point to a new script that does exactly this or use a flag.
+                MASTER_PASS="" fetch_and_run "user_manager.sh" --show "$dname" || true
+                ;;
+            4) fetch_and_run "user_manager.sh" ;;
+            5) fetch_and_run "backup_manager.sh" ;;
+            6) fetch_and_run "domain_bypass.sh" ;;
+            7) fetch_and_run "Cloak2-Installer.sh" ;;
             s) settings_menu ;;
             r)
                 fetch_and_run "remove_server.sh"
