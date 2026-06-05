@@ -43,7 +43,7 @@ case "$input_VPN_PORT" in
     3) PORT="123" ;;
     4) PORT="80" ;;
     5) PORT="51820" ;;
-    "")
+    "") 
         PORT=$((RANDOM % 60000 + 1025))
         echo -e "${PURPLE}Selected random port: ${PORT}${NC}"
         ;;
