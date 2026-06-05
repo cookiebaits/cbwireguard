@@ -82,9 +82,9 @@ display_menu() {
     echo -en "\n${GREEN}Choose the action:
 [1] Setup WireGuard server
 [2] Add new client (peer)
-[3] Show client (peer) QR
-[4] List configured clients
-[5] Backup & Restore Manager
+[3] User Management (Check, Delete, Edit)
+[4] Backup & Restore Manager
+[5] Domain-Based Split Tunneling
 [6] Install/Manage Cloak (Stealth Plugin)
 [s] Settings (MTU, DNS, AllowedIPs)
 ${RED}[r] Remove WireGuard server from this system${GREEN}
@@ -99,7 +99,6 @@ settings_menu() {
         echo -e "${GREEN}[1] Default MTU: ${NC}${DEFAULT_MTU:-1280}"
         echo -e "${GREEN}[2] Default DNS: ${NC}${DEFAULT_DNS:-"94.140.14.49, 9.9.9.9, 94.140.14.59"}"
         echo -e "${GREEN}[3] Default Allowed IPs: ${NC}${DEFAULT_ALLOWED_IPS:-"0.0.0.0/1, 128.0.0.0/1"}"
-        echo -e "${GREEN}[4] Domain-Based Split Tunneling${NC}"
         echo -e "${GREEN}[b] Back to Main Menu${NC}"
         echo -en "${PURPLE}Select option: ${NC}"
         read -r SET_OPT
@@ -123,7 +122,6 @@ settings_menu() {
                 update_setting "DEFAULT_ALLOWED_IPS" "\"$NEW_IPS\""
                 DEFAULT_ALLOWED_IPS="$NEW_IPS"
                 ;;
-            4) fetch_and_run "domain_bypass.sh" ;;
             b) break ;;
         esac
     done
@@ -142,9 +140,9 @@ main() {
         case "$OPTION" in
             1) fetch_and_run "setup_server.sh" ;;
             2) fetch_and_run "add_client.sh" ;;
-            3) fetch_and_run "show_qr.sh" ;;
-            4) fetch_and_run "list_clients.sh" ;;
-            5) fetch_and_run "backup_manager.sh" ;;
+            3) fetch_and_run "user_manager.sh" ;;
+            4) fetch_and_run "backup_manager.sh" ;;
+            5) fetch_and_run "domain_bypass.sh" ;;
             6) fetch_and_run "Cloak2-Installer.sh" ;;
             s) settings_menu ;;
             r)
