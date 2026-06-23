@@ -47,12 +47,14 @@ fi
 # P2: Detection of optional stealth components
 HAS_CLOAK=false
 HAS_SS=false
+HAS_V2RAY=false
 [[ -d "/etc/cloak" ]] && HAS_CLOAK=true
 [[ -d "/etc/shadowsocks-rust" ]] && HAS_SS=true
+[[ -f "/usr/local/bin/v2ray" ]] && HAS_V2RAY=true
 
 STEALTH_MODE="n"
-if [[ "$HAS_CLOAK" == true || "$HAS_SS" == true ]]; then
-    echo -en "${GREEN}Enable Stealth Mode (WireGuard over Cloak/Shadowsocks) [y/n]? ${NC}"
+if [[ "$HAS_CLOAK" == true || "$HAS_SS" == true || "$HAS_V2RAY" == true ]]; then
+    echo -en "${GREEN}Enable Stealth Mode (WireGuard over Cloak/SS/V2Ray) [y/n]? ${NC}"
     read -r STEALTH_MODE
 else
     echo -en "${GREEN}Stealth layer not detected. Install it now? [y/n]: ${NC}"
@@ -136,12 +138,22 @@ EOF
     echo -e "${GREEN}Stealth Mode Instructions:${NC}"
     echo -e "${PURPLE}By default, this config points to the Server IP for standard use.${NC}"
 
+    if [[ "$HAS_V2RAY" == true ]]; then
+        v2_uuid=$(cat /usr/local/etc/v2ray/client_uuid.txt 2>/dev/null || echo "UUID")
+        echo -e "To enable ${GREEN}V2Ray (VMess + WS)${NC} obfuscation:"
+        echo -e "1. Change the ${GREEN}Endpoint${NC} in your WireGuard app to ${PURPLE}127.0.0.1:1080${NC}"
+        echo -e "2. Use a V2Ray client (like v2rayN/v2rayNG) with these settings:"
+        echo -e "   - Address: ${PURPLE}$IP_ADR${NC}, Port: ${PURPLE}8888${NC}, ID: ${PURPLE}$v2_uuid${NC}"
+        echo -e "   - Transport: ${PURPLE}ws${NC}, Path: ${PURPLE}/video${NC}"
+        echo -e "   - SOCKS Proxy: ${PURPLE}127.0.0.1:1080${NC} (This is where WG connects)"
+    fi
+
     if [[ "$HAS_CLOAK" == true && "$HAS_SS" == true ]]; then
         ck_port=$(grep "^PORT=" /etc/cloak/ckport.txt | cut -d= -f2 || echo "443")
         ck_uid=$(grep "^ckaauid=" /etc/cloak/ckport.txt | cut -d= -f2 | tr -d '"' || echo "UID")
         ss_pass=$(jq -r '.password' /etc/shadowsocks-rust/config.json || echo "PASSWORD")
 
-        echo -e "To enable ${GREEN}Shadowsocks + Cloak${NC} obfuscation:"
+        echo -e "\nTo enable ${GREEN}Shadowsocks + Cloak${NC} obfuscation:"
         echo -e "1. Change the ${GREEN}Endpoint${NC} in your WireGuard app to ${PURPLE}127.0.0.1:1080${NC}"
         echo -e "2. Run Cloak client: ${PURPLE}ck-client -s $IP_ADR -p $ck_port -a $ck_uid -l 1984 -c ckclient.json &${NC}"
         echo -e "3. Run Shadowsocks client: ${PURPLE}ss-local -s 127.0.0.1 -p 1984 -l 1080 -k $ss_pass -m aes-256-gcm &${NC}"
