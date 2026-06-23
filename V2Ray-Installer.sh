@@ -231,6 +231,50 @@ setup_firewall() {
     fi
 }
 
+test_integration() {
+    echo -e "\n${GREEN}Running Integration Tests...${NC}"
+    local errors=0
+
+    # 1. Service check
+    if systemctl is-active --quiet v2ray; then
+        echo -e "[PASS] V2Ray service is running."
+    else
+        echo -e "${RED}[FAIL] V2Ray service is NOT running.${NC}"
+        errors=$((errors + 1))
+    fi
+
+    # 2. Port check
+    if ss -lnpt | grep -q ":8888 "; then
+        echo -e "[PASS] V2Ray Stealth Port (8888) is listening."
+    else
+        echo -e "${RED}[FAIL] V2Ray Stealth Port (8888) is NOT listening.${NC}"
+        errors=$((errors + 1))
+    fi
+
+    if ss -lnpt | grep -q ":12345 "; then
+        echo -e "[PASS] V2Ray TProxy Port (12345) is listening."
+    else
+        echo -e "${RED}[FAIL] V2Ray TProxy Port (12345) is NOT listening.${NC}"
+        errors=$((errors + 1))
+    fi
+
+    # 3. Iptables check
+    if iptables -t mangle -L V2RAY -n >/dev/null 2>&1; then
+        echo -e "[PASS] Iptables V2RAY mangle chain is present."
+    else
+        echo -e "${RED}[FAIL] Iptables V2RAY mangle chain is MISSING.${NC}"
+        errors=$((errors + 1))
+    fi
+
+    if [[ $errors -eq 0 ]]; then
+        echo -e "${GREEN}Integration Success: V2Ray and WireGuard are working together!${NC}"
+        return 0
+    else
+        echo -e "${RED}Integration Error: Some checks failed. Troubleshooting may be needed.${NC}"
+        return 1
+    fi
+}
+
 start_v2ray() {
     echo -e "${GREEN}Starting V2Ray service...${NC}"
     systemctl enable v2ray
@@ -289,6 +333,17 @@ print_menu() {
 }
 
 main() {
+    if [[ "${1:-}" == "--install" ]]; then
+        install_v2ray
+        generate_config
+        setup_tproxy_routing
+        setup_firewall
+        start_v2ray
+        test_integration
+        show_status
+        return
+    fi
+
     while true; do
         print_menu
         echo -en "${GREEN}Option: ${NC}"
@@ -300,6 +355,7 @@ main() {
                 setup_tproxy_routing
                 setup_firewall
                 start_v2ray
+                test_integration
                 show_status
                 ;;
             2) show_status ;;
@@ -316,4 +372,4 @@ main() {
     done
 }
 
-main
+main "$@"

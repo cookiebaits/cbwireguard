@@ -200,9 +200,8 @@ fi
 if [[ -f "./V2Ray-Installer.sh" ]]; then
     chmod +x ./V2Ray-Installer.sh
     # Automatically perform installation and configuration
-    # Note: Option 1 in V2Ray-Installer.sh performs Install/Update
-    # It might prompt for Master Password if we haven't exported it
-    echo "1" | ./V2Ray-Installer.sh
+    # Using --install flag to avoid piping and allow interactive password prompt
+    ./V2Ray-Installer.sh --install
 else
     echo -e "${RED}Warning: V2Ray-Installer.sh not found. Skipping integrated enhancements.${NC}"
 fi
