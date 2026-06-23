@@ -48,25 +48,9 @@ fi
 HAS_V2RAY=false
 [[ -f "/usr/local/bin/v2ray" ]] && HAS_V2RAY=true
 
-STEALTH_MODE="n"
-if [[ "$HAS_V2RAY" == true ]]; then
-    echo -en "${GREEN}Enable Stealth Mode (WireGuard over V2Ray) [y/n]? ${NC}"
-    read -r STEALTH_MODE
-else
-    echo -en "${GREEN}V2Ray stealth layer not detected. Install it now? [y/n]: ${NC}"
-    read -r install_stealth
-    if [[ "$install_stealth" =~ ^[Yy]$ ]]; then
-        if [[ -f "./V2Ray-Installer.sh" ]]; then
-            chmod +x ./V2Ray-Installer.sh
-            ./V2Ray-Installer.sh
-            [[ -f "/usr/local/bin/v2ray" ]] && HAS_V2RAY=true
-            echo -en "${GREEN}Enable Stealth Mode for this client [y/n]? ${NC}"
-            read -r STEALTH_MODE
-        else
-            echo -e "${RED}Error: V2Ray-Installer.sh not found.${NC}"
-        fi
-    fi
-fi
+# Since V2Ray is integrated via TProxy on the server side,
+# standard WireGuard clients automatically benefit from its routing.
+# No special "Stealth Mode" prompt needed here for the client config.
 
 echo -en "${GREEN}Is QR-code suitable for output [y/n]? ${NC}"
 read -r IS_QRCODE
@@ -112,46 +96,8 @@ CLIENT_IP="$SERVER_PRIVATE_IP_PREFIX.$NEXT_IP"
 
 CLIENT_CONF="/etc/wireguard/clients/$DEVICE_NAME.conf"
 
-if [[ "$STEALTH_MODE" =~ ^[Yy]$ ]]; then
-    # P2: Advanced Stealth - Conditional Instructions
-
-    # Defaults
-    cat <<EOF > "$CLIENT_CONF"
-[Interface]
-PrivateKey = $DEVICE_PRIVATE
-Address = $CLIENT_IP/32
-DNS = $DNS
-MTU = 1280
-
-[Peer]
-PublicKey = $SERVER_PUBLIC
-Endpoint = $IP_ADR:$PORT
-AllowedIPs = $ALLOWED_IPS
-EOF
-
-    echo -e "${PURPLE}======================================================${NC}"
-    echo -e "${GREEN}Stealth Mode Instructions:${NC}"
-    echo -e "${PURPLE}By default, this config points to the Server IP for standard use.${NC}"
-
-    if [[ "$HAS_V2RAY" == true ]]; then
-        v2_uuid="UUID"
-        V2_UUID_ENC="/usr/local/etc/v2ray/client_uuid.enc"
-        if [[ -f "$V2_UUID_ENC" ]]; then
-            get_master_pass
-            v2_uuid=$(openssl enc -aes-256-cbc -d -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "$V2_UUID_ENC" 2>/dev/null || echo "FAILED_TO_DECRYPT")
-        fi
-
-        echo -e "To enable ${GREEN}V2Ray (VMess + WS)${NC} obfuscation:"
-        echo -e "1. Change the ${GREEN}Endpoint${NC} in your WireGuard app to ${PURPLE}127.0.0.1:1080${NC}"
-        echo -e "2. Use a V2Ray client (like v2rayN/v2rayNG) with these settings:"
-        echo -e "   - Address: ${PURPLE}$IP_ADR${NC}, Port: ${PURPLE}8888${NC}, ID: ${PURPLE}$v2_uuid${NC}"
-        echo -e "   - Transport: ${PURPLE}ws${NC}, Path: ${PURPLE}/video${NC}"
-        echo -e "   - SOCKS Proxy: ${PURPLE}127.0.0.1:1080${NC} (This is where WG connects)"
-    fi
-
-    echo -e "${PURPLE}======================================================${NC}"
-else
-    cat <<EOF > "$CLIENT_CONF"
+# Generate standard config
+cat <<EOF > "$CLIENT_CONF"
 [Interface]
 PrivateKey = $DEVICE_PRIVATE
 Address = $CLIENT_IP/32
@@ -163,7 +109,6 @@ PublicKey = $SERVER_PUBLIC
 Endpoint = $IP_PORT
 AllowedIPs = $ALLOWED_IPS
 EOF
-fi
 
 chmod 600 "$CLIENT_CONF"
 
@@ -208,3 +153,8 @@ fi
 
 encrypt_config
 rm -f "$CLIENT_CONF"
+
+if [[ "$HAS_V2RAY" == true ]]; then
+    echo -e "\n${GREEN}Note: V2Ray Streaming & Stealth enhancements are active on this server.${NC}"
+    echo -e "${PURPLE}Geoblocked streaming content will be transparently routed via V2Ray.${NC}"
+fi

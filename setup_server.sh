@@ -195,14 +195,22 @@ echo -e "${GREEN}Server Setup Complete!${NC}"
 echo -e "${PURPLE}Your WireGuard server is running on port: ${PORT}${NC}"
 echo -e "${PURPLE}======================================================${NC}\n"
 
-echo -en "${GREEN}Do you want to install V2Ray (V2Fly) for Stealth & Streaming [y/n]? ${NC}"
+echo -en "${GREEN}Do you want to install V2Ray (V2Fly) for Integrated Stealth & Streaming [y/n]? ${NC}"
 read -r install_v2ray
 if [[ "$install_v2ray" =~ ^[Yy]$ ]]; then
+    if [[ ! -f "./V2Ray-Installer.sh" ]]; then
+        echo -e "${GREEN}Fetching V2Ray-Installer.sh...${NC}"
+        # Hardcoding repo URL for direct download if local file is missing during one-click install
+        GIT_REPO_RAW="https://raw.githubusercontent.com/cookiebaits/cbwireguard/main"
+        curl -sSfL "${GIT_REPO_RAW}/V2Ray-Installer.sh" -o "./V2Ray-Installer.sh" || true
+    fi
+
     if [[ -f "./V2Ray-Installer.sh" ]]; then
         chmod +x ./V2Ray-Installer.sh
         # Automatically run option 1 (Install/Update)
+        # This will set up TProxy for all WireGuard traffic and specific streaming rules
         echo "1" | ./V2Ray-Installer.sh
     else
-        echo -e "${RED}Error: V2Ray-Installer.sh not found.${NC}"
+        echo -e "${RED}Error: V2Ray-Installer.sh not found and could not be downloaded.${NC}"
     fi
 fi

@@ -108,6 +108,11 @@ generate_config() {
       "tag": "streaming"
     },
     {
+      "protocol": "freedom",
+      "settings": {},
+      "tag": "streaming-fallback"
+    },
+    {
       "protocol": "dokodemo-door",
       "settings": {
         "address": "127.0.0.1",
@@ -130,6 +135,16 @@ generate_config() {
       {
         "type": "field",
         "outboundTag": "streaming",
+        "domain": [
+          "geosite:netflix",
+          "geosite:disney",
+          "geosite:hulu",
+          "geosite:spotify"
+        ]
+      },
+      {
+        "type": "field",
+        "outboundTag": "streaming-fallback",
         "domain": [
           "domain:btstatic.com",
           "domain:netflix.com",
