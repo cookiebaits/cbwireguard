@@ -310,16 +310,22 @@ test_integration() {
         errors=$((errors + 1))
     fi
 
+    # Display logs regardless of status as requested
+    echo -e "${PURPLE}\n--- V2Ray Service Status ---${NC}"
+    systemctl status v2ray --no-pager || true
+    echo -e "${PURPLE}--- Last 10 lines of Journal ---${NC}"
+    journalctl -u v2ray -n 10 --no-pager || true
+    echo -e "${PURPLE}----------------------------${NC}"
+
     if [[ $errors -ne 0 ]]; then
-        echo -e "${RED}\nIntegration Error: Some checks failed. Displaying diagnostics...${NC}"
-        echo -e "${PURPLE}--- V2Ray Service Status ---${NC}"
-        systemctl status v2ray --no-pager || true
-        echo -e "${PURPLE}--- Last 20 lines of Journal ---${NC}"
-        journalctl -u v2ray -n 20 --no-pager || true
-        echo -e "${PURPLE}----------------------------${NC}"
+        echo -e "${RED}\nIntegration Error: Some checks failed. Please review the logs above.${NC}"
+        echo -en "${GREEN}\nPress Enter to return to menu...${NC}"
+        read -r
         return 1
     else
-        echo -e "${GREEN}Integration Success: V2Ray and WireGuard are working together!${NC}"
+        echo -e "${GREEN}\nIntegration Success: V2Ray and WireGuard are working together!${NC}"
+        echo -en "${GREEN}\nPress Enter to continue and add users...${NC}"
+        read -r
         return 0
     fi
 }
