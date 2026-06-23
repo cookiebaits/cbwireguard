@@ -45,30 +45,25 @@ if [[ -z "$DEVICE_NAME" ]]; then
 fi
 
 # P2: Detection of optional stealth components
-HAS_CLOAK=false
-HAS_SS=false
 HAS_V2RAY=false
-[[ -d "/etc/cloak" ]] && HAS_CLOAK=true
-[[ -d "/etc/shadowsocks-rust" ]] && HAS_SS=true
 [[ -f "/usr/local/bin/v2ray" ]] && HAS_V2RAY=true
 
 STEALTH_MODE="n"
-if [[ "$HAS_CLOAK" == true || "$HAS_SS" == true || "$HAS_V2RAY" == true ]]; then
-    echo -en "${GREEN}Enable Stealth Mode (WireGuard over Cloak/SS/V2Ray) [y/n]? ${NC}"
+if [[ "$HAS_V2RAY" == true ]]; then
+    echo -en "${GREEN}Enable Stealth Mode (WireGuard over V2Ray) [y/n]? ${NC}"
     read -r STEALTH_MODE
 else
-    echo -en "${GREEN}Stealth layer not detected. Install it now? [y/n]: ${NC}"
+    echo -en "${GREEN}V2Ray stealth layer not detected. Install it now? [y/n]: ${NC}"
     read -r install_stealth
     if [[ "$install_stealth" =~ ^[Yy]$ ]]; then
-        if [[ -f "./Cloak2-Installer.sh" ]]; then
-            chmod +x ./Cloak2-Installer.sh
-            ./Cloak2-Installer.sh
-            [[ -d "/etc/cloak" ]] && HAS_CLOAK=true
-            [[ -d "/etc/shadowsocks-rust" ]] && HAS_SS=true
+        if [[ -f "./V2Ray-Installer.sh" ]]; then
+            chmod +x ./V2Ray-Installer.sh
+            ./V2Ray-Installer.sh
+            [[ -f "/usr/local/bin/v2ray" ]] && HAS_V2RAY=true
             echo -en "${GREEN}Enable Stealth Mode for this client [y/n]? ${NC}"
             read -r STEALTH_MODE
         else
-            echo -e "${RED}Error: Cloak2-Installer.sh not found.${NC}"
+            echo -e "${RED}Error: V2Ray-Installer.sh not found.${NC}"
         fi
     fi
 fi
@@ -139,7 +134,13 @@ EOF
     echo -e "${PURPLE}By default, this config points to the Server IP for standard use.${NC}"
 
     if [[ "$HAS_V2RAY" == true ]]; then
-        v2_uuid=$(cat /usr/local/etc/v2ray/client_uuid.txt 2>/dev/null || echo "UUID")
+        v2_uuid="UUID"
+        V2_UUID_ENC="/usr/local/etc/v2ray/client_uuid.enc"
+        if [[ -f "$V2_UUID_ENC" ]]; then
+            get_master_pass
+            v2_uuid=$(openssl enc -aes-256-cbc -d -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "$V2_UUID_ENC" 2>/dev/null || echo "FAILED_TO_DECRYPT")
+        fi
+
         echo -e "To enable ${GREEN}V2Ray (VMess + WS)${NC} obfuscation:"
         echo -e "1. Change the ${GREEN}Endpoint${NC} in your WireGuard app to ${PURPLE}127.0.0.1:1080${NC}"
         echo -e "2. Use a V2Ray client (like v2rayN/v2rayNG) with these settings:"
@@ -148,28 +149,6 @@ EOF
         echo -e "   - SOCKS Proxy: ${PURPLE}127.0.0.1:1080${NC} (This is where WG connects)"
     fi
 
-    if [[ "$HAS_CLOAK" == true && "$HAS_SS" == true ]]; then
-        ck_port=$(grep "^PORT=" /etc/cloak/ckport.txt | cut -d= -f2 || echo "443")
-        ck_uid=$(grep "^ckaauid=" /etc/cloak/ckport.txt | cut -d= -f2 | tr -d '"' || echo "UID")
-        ss_pass=$(jq -r '.password' /etc/shadowsocks-rust/config.json || echo "PASSWORD")
-
-        echo -e "\nTo enable ${GREEN}Shadowsocks + Cloak${NC} obfuscation:"
-        echo -e "1. Change the ${GREEN}Endpoint${NC} in your WireGuard app to ${PURPLE}127.0.0.1:1080${NC}"
-        echo -e "2. Run Cloak client: ${PURPLE}ck-client -s $IP_ADR -p $ck_port -a $ck_uid -l 1984 -c ckclient.json &${NC}"
-        echo -e "3. Run Shadowsocks client: ${PURPLE}ss-local -s 127.0.0.1 -p 1984 -l 1080 -k $ss_pass -m aes-256-gcm &${NC}"
-    elif [[ "$HAS_SS" == true ]]; then
-        ss_port=$(jq -r '.server_port' /etc/shadowsocks-rust/config.json || echo "8388")
-        ss_pass=$(jq -r '.password' /etc/shadowsocks-rust/config.json || echo "PASSWORD")
-        echo -e "To enable ${GREEN}Shadowsocks Only${NC} obfuscation:"
-        echo -e "1. Change the ${GREEN}Endpoint${NC} in your WireGuard app to ${PURPLE}127.0.0.1:1080${NC}"
-        echo -e "2. Run Shadowsocks client: ${PURPLE}ss-local -s $IP_ADR -p $ss_port -l 1080 -k $ss_pass -m aes-256-gcm &${NC}"
-    elif [[ "$HAS_CLOAK" == true ]]; then
-        ck_port=$(grep "^PORT=" /etc/cloak/ckport.txt | cut -d= -f2 || echo "443")
-        ck_uid=$(grep "^ckaauid=" /etc/cloak/ckport.txt | cut -d= -f2 | tr -d '"' || echo "UID")
-        echo -e "To enable ${GREEN}Cloak Only${NC} obfuscation:"
-        echo -e "1. Change the ${GREEN}Endpoint${NC} in your WireGuard app to ${PURPLE}127.0.0.1:1080${NC}"
-        echo -e "2. Run Cloak client: ${PURPLE}ck-client -s $IP_ADR -p $ck_port -a $ck_uid -l 1080 -c ckclient.json &${NC}"
-    fi
     echo -e "${PURPLE}======================================================${NC}"
 else
     cat <<EOF > "$CLIENT_CONF"

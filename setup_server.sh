@@ -194,3 +194,15 @@ echo -e "\n${PURPLE}======================================================${NC}"
 echo -e "${GREEN}Server Setup Complete!${NC}"
 echo -e "${PURPLE}Your WireGuard server is running on port: ${PORT}${NC}"
 echo -e "${PURPLE}======================================================${NC}\n"
+
+echo -en "${GREEN}Do you want to install V2Ray (V2Fly) for Stealth & Streaming [y/n]? ${NC}"
+read -r install_v2ray
+if [[ "$install_v2ray" =~ ^[Yy]$ ]]; then
+    if [[ -f "./V2Ray-Installer.sh" ]]; then
+        chmod +x ./V2Ray-Installer.sh
+        # Automatically run option 1 (Install/Update)
+        echo "1" | ./V2Ray-Installer.sh
+    else
+        echo -e "${RED}Error: V2Ray-Installer.sh not found.${NC}"
+    fi
+fi
