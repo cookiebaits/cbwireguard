@@ -40,7 +40,7 @@ generate_config() {
     cat <<EOF > "$V2RAY_CONFIG"
 {
   "log": {
-    "loglevel": "none"
+    "loglevel": "warning"
   },
   "inbounds": [
     {
@@ -90,7 +90,8 @@ generate_config() {
       },
       "streamSettings": {
         "sockopt": {
-          "tproxy": "tproxy"
+          "tproxy": "tproxy",
+          "mark": 1
         }
       },
       "sniffing": {
@@ -106,8 +107,15 @@ generate_config() {
   "outbounds": [
     {
       "protocol": "freedom",
-      "settings": {},
-      "tag": "direct"
+      "settings": {
+        "domainStrategy": "UseIP"
+      },
+      "tag": "direct",
+      "streamSettings": {
+        "sockopt": {
+          "mark": 255
+        }
+      }
     },
     {
       "protocol": "socks",
@@ -248,11 +256,14 @@ test_integration() {
     echo -e "\n${GREEN}Running Integration Tests...${NC}"
     local errors=0
 
+    # Give V2Ray a moment to bind ports
+    sleep 3
+
     # 1. Service check
     if systemctl is-active --quiet v2ray; then
-        echo -e "[PASS] V2Ray service is running."
+        echo -e "[PASS] V2Ray service is active."
     else
-        echo -e "${RED}[FAIL] V2Ray service is NOT running.${NC}"
+        echo -e "${RED}[FAIL] V2Ray service is NOT active.${NC}"
         errors=$((errors + 1))
     fi
 
@@ -289,28 +300,47 @@ test_integration() {
     # 4. WireGuard Interface & Data Check
     if ip link show wg0 >/dev/null 2>&1; then
         echo -e "[PASS] WireGuard interface (wg0) is UP."
-        # Check if there is any traffic (handshake or data)
         if wg show wg0 transfer >/dev/null 2>&1; then
              echo -e "[INFO] WireGuard transfer data detected."
         else
-             echo -e "${PURPLE}[NOTE] No WireGuard transfer data detected yet. This is normal for a new setup.${NC}"
+             echo -e "${PURPLE}[NOTE] No WireGuard transfer data detected yet.${NC}"
         fi
     else
         echo -e "${RED}[FAIL] WireGuard interface (wg0) is DOWN.${NC}"
         errors=$((errors + 1))
     fi
 
-    if [[ $errors -eq 0 ]]; then
+    if [[ $errors -ne 0 ]]; then
+        echo -e "${RED}\nIntegration Error: Some checks failed. Displaying diagnostics...${NC}"
+        echo -e "${PURPLE}--- V2Ray Service Status ---${NC}"
+        systemctl status v2ray --no-pager || true
+        echo -e "${PURPLE}--- Last 20 lines of Journal ---${NC}"
+        journalctl -u v2ray -n 20 --no-pager || true
+        echo -e "${PURPLE}----------------------------${NC}"
+        return 1
+    else
         echo -e "${GREEN}Integration Success: V2Ray and WireGuard are working together!${NC}"
         return 0
-    else
-        echo -e "${RED}Integration Error: Some checks failed. Troubleshooting may be needed.${NC}"
-        return 1
     fi
 }
 
 start_v2ray() {
-    echo -e "${GREEN}Starting V2Ray service...${NC}"
+    echo -e "${GREEN}Verifying V2Ray configuration...${NC}"
+    if ! /usr/local/bin/v2ray test -c "$V2RAY_CONFIG"; then
+        echo -e "${RED}Error: V2Ray configuration test failed!${NC}"
+        return 1
+    fi
+
+    echo -e "${GREEN}Applying service hardening and starting V2Ray...${NC}"
+    mkdir -p /etc/systemd/system/v2ray.service.d
+    cat <<EOF > /etc/systemd/system/v2ray.service.d/10-capabilities.conf
+[Service]
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+EOF
+
+    systemctl daemon-reload
     systemctl enable v2ray
     systemctl restart v2ray
 }
@@ -319,6 +349,7 @@ uninstall_v2ray() {
     echo -e "${RED}Uninstalling V2Ray and clearing routing...${NC}"
     systemctl stop v2ray || true
     systemctl disable v2ray || true
+    rm -rf /etc/systemd/system/v2ray.service.d
 
     bash <(curl -Ls https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh) --remove
     rm -rf /usr/local/etc/v2ray
@@ -349,9 +380,9 @@ show_status() {
         local uuid
         uuid=$(openssl enc -aes-256-cbc -d -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "$V2RAY_UUID_FILE" 2>/dev/null || echo "Decryption Failed")
         echo -e "${PURPLE}Connection Info (Stealth VMess):${NC}"
-        echo -e "Port: 8888, UUID: $uuid, Protocol: VMess, Transport: ws, Path: /video"
+        echo -e "Port: 8880, UUID: $uuid, Protocol: VMess, Transport: ws, Path: /video"
         echo -e "${PURPLE}WireGuard Integration:${NC}"
-        echo -e "TProxy Port: 12345, Streaming: Netflix/Spotify/etc routed to 127.0.0.1:9050"
+        echo -e "Stealth UDP Entry: 8888, TProxy Port: 12345"
     else
         echo -e "${RED}V2Ray is not running.${NC}"
     fi
