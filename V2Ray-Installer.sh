@@ -82,6 +82,13 @@ generate_config() {
           "tproxy": "tproxy"
         }
       },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls"
+        ]
+      },
       "tag": "tproxy-in"
     }
   ],
@@ -111,27 +118,11 @@ generate_config() {
       "protocol": "freedom",
       "settings": {},
       "tag": "streaming-fallback"
-    },
-    {
-      "protocol": "dokodemo-door",
-      "settings": {
-        "address": "127.0.0.1",
-        "port": $wg_port,
-        "network": "udp"
-      },
-      "tag": "wg-out"
     }
   ],
   "routing": {
     "domainStrategy": "IPIfNonMatch",
     "rules": [
-      {
-        "type": "field",
-        "inboundTag": [
-          "vmess-in"
-        ],
-        "outboundTag": "wg-out"
-      },
       {
         "type": "field",
         "outboundTag": "streaming",

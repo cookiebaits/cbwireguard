@@ -44,13 +44,8 @@ if [[ -z "$DEVICE_NAME" ]]; then
     exit 1
 fi
 
-# P2: Detection of optional stealth components
 HAS_V2RAY=false
 [[ -f "/usr/local/bin/v2ray" ]] && HAS_V2RAY=true
-
-# Since V2Ray is integrated via TProxy on the server side,
-# standard WireGuard clients automatically benefit from its routing.
-# No special "Stealth Mode" prompt needed here for the client config.
 
 echo -en "${GREEN}Is QR-code suitable for output [y/n]? ${NC}"
 read -r IS_QRCODE
@@ -96,7 +91,7 @@ CLIENT_IP="$SERVER_PRIVATE_IP_PREFIX.$NEXT_IP"
 
 CLIENT_CONF="/etc/wireguard/clients/$DEVICE_NAME.conf"
 
-# Generate standard config
+# Generate standard WireGuard config - No additional stealth setup needed for the client app
 cat <<EOF > "$CLIENT_CONF"
 [Interface]
 PrivateKey = $DEVICE_PRIVATE
@@ -136,7 +131,6 @@ get_master_pass() {
 encrypt_config() {
     get_master_pass
     openssl enc -aes-256-cbc -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "$CLIENT_CONF" -out "${CLIENT_CONF}.enc"
-    # Keep the plain text for the current display, then delete
 }
 
 if [[ "$IS_QRCODE" == "y" || -z "$IS_QRCODE" ]]; then
@@ -154,7 +148,8 @@ fi
 encrypt_config
 rm -f "$CLIENT_CONF"
 
+echo -e "\n${GREEN}Client Added Successfully!${NC}"
 if [[ "$HAS_V2RAY" == true ]]; then
-    echo -e "\n${GREEN}Note: V2Ray Streaming & Stealth enhancements are active on this server.${NC}"
-    echo -e "${PURPLE}Geoblocked streaming content will be transparently routed via V2Ray.${NC}"
+    echo -e "${PURPLE}Integrated Stealth (TProxy) and Streaming Enhancements are active.${NC}"
+    echo -e "${PURPLE}Just import the configuration file into your WireGuard client app.${NC}"
 fi

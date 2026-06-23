@@ -190,27 +190,25 @@ if ! systemctl restart wg-quick@wg0.service; then
 fi
 systemctl status --no-pager -l wg-quick@wg0.service
 
-echo -e "\n${PURPLE}======================================================${NC}"
-echo -e "${GREEN}Server Setup Complete!${NC}"
-echo -e "${PURPLE}Your WireGuard server is running on port: ${PORT}${NC}"
-echo -e "${PURPLE}======================================================${NC}\n"
-
-echo -en "${GREEN}Do you want to install V2Ray (V2Fly) for Integrated Stealth & Streaming [y/n]? ${NC}"
-read -r install_v2ray
-if [[ "$install_v2ray" =~ ^[Yy]$ ]]; then
-    if [[ ! -f "./V2Ray-Installer.sh" ]]; then
-        echo -e "${GREEN}Fetching V2Ray-Installer.sh...${NC}"
-        # Hardcoding repo URL for direct download if local file is missing during one-click install
-        GIT_REPO_RAW="https://raw.githubusercontent.com/cookiebaits/cbwireguard/main"
-        curl -sSfL "${GIT_REPO_RAW}/V2Ray-Installer.sh" -o "./V2Ray-Installer.sh" || true
-    fi
-
-    if [[ -f "./V2Ray-Installer.sh" ]]; then
-        chmod +x ./V2Ray-Installer.sh
-        # Automatically run option 1 (Install/Update)
-        # This will set up TProxy for all WireGuard traffic and specific streaming rules
-        echo "1" | ./V2Ray-Installer.sh
-    else
-        echo -e "${RED}Error: V2Ray-Installer.sh not found and could not be downloaded.${NC}"
-    fi
+echo -e "\n${GREEN}Installing Integrated Stealth & Streaming Enhancement (V2Ray)...${NC}"
+if [[ ! -f "./V2Ray-Installer.sh" ]]; then
+    echo -e "${GREEN}Fetching V2Ray-Installer.sh...${NC}"
+    GIT_REPO_RAW="https://raw.githubusercontent.com/cookiebaits/cbwireguard/main"
+    curl -sSfL "${GIT_REPO_RAW}/V2Ray-Installer.sh" -o "./V2Ray-Installer.sh" || true
 fi
+
+if [[ -f "./V2Ray-Installer.sh" ]]; then
+    chmod +x ./V2Ray-Installer.sh
+    # Automatically perform installation and configuration
+    # Note: Option 1 in V2Ray-Installer.sh performs Install/Update
+    # It might prompt for Master Password if we haven't exported it
+    echo "1" | ./V2Ray-Installer.sh
+else
+    echo -e "${RED}Warning: V2Ray-Installer.sh not found. Skipping integrated enhancements.${NC}"
+fi
+
+echo -e "\n${PURPLE}======================================================${NC}"
+echo -e "${GREEN}Full Server Setup Complete!${NC}"
+echo -e "${PURPLE}Your WireGuard server is running on port: ${PORT}${NC}"
+echo -e "${PURPLE}Integrated V2Ray (TProxy + Streaming) is active.${NC}"
+echo -e "${PURPLE}======================================================${NC}\n"
