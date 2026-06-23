@@ -24,7 +24,7 @@ fi
 # Ideally, the user should provide this once per session.
 get_master_pass() {
     if [[ -z "${MASTER_PASS:-}" ]]; then
-        echo -en "${GREEN}Enter Master Password for Client Encryption/Decryption: ${NC}"
+        echo -en "${GREEN}Enter Decryption password: ${NC}"
         read -rs MASTER_PASS
         echo
         export MASTER_PASS
@@ -41,7 +41,10 @@ encrypt_file() {
 decrypt_file_to_stdout() {
     local file="$1"
     get_master_pass
-    openssl enc -aes-256-cbc -d -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "$file" 2>/dev/null || echo "FAILED"
+    if ! openssl enc -aes-256-cbc -d -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "$file" 2>/dev/null; then
+        unset MASTER_PASS
+        echo "FAILED"
+    fi
 }
 
 list_users() {
@@ -61,6 +64,7 @@ list_users() {
 }
 
 show_user() {
+    unset MASTER_PASS
     list_users || return
     echo -en "${GREEN}Enter username to view: ${NC}"
     read -r username
@@ -86,6 +90,7 @@ show_user() {
 }
 
 delete_user() {
+    unset MASTER_PASS
     list_users || return
     echo -en "${RED}Enter username to DELETE: ${NC}"
     read -r username
@@ -119,6 +124,7 @@ delete_user() {
 }
 
 edit_user() {
+    unset MASTER_PASS
     list_users || return
     echo -en "${GREEN}Enter username to EDIT: ${NC}"
     read -r username
@@ -134,6 +140,7 @@ edit_user() {
 
         local temp_file
         temp_file=$(mktemp)
+        trap 'rm -f "$temp_file"' EXIT
         echo "$content" > "$temp_file"
 
         echo -e "${GREEN}Editing configuration for $username...${NC}"
@@ -144,12 +151,14 @@ edit_user() {
         mv "${temp_file}.enc" "$file"
         echo -e "${PURPLE}Configuration updated and re-encrypted.${NC}"
         echo -e "${RED}Note: Manual edits to IP/Keys in the client file do not sync automatically to the server wg0.conf in this version.${NC}"
+        trap - EXIT
     else
         echo -e "${RED}User not found.${NC}"
     fi
 }
 
 show_user_by_name() {
+    unset MASTER_PASS
     local username="$1"
     local file="${CLIENT_DIR}/${username}.conf.enc"
 
@@ -178,13 +187,21 @@ if [[ "${1:-}" == "--show" && -n "${2:-}" ]]; then
     exit 0
 fi
 
+print_menu() {
+    echo -e "${PURPLE}┌──────────────────────────────────────────────┐${NC}"
+    echo -e "${PURPLE}│      User Management (Configure Clients)     │${NC}"
+    echo -e "${PURPLE}├──────────────────────────────────────────────┤${NC}"
+    echo -e "${PURPLE}│ ${NC}[1] List users                               ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[2] Check configuration (Show QR/Text)       ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[3] Edit configuration                        ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${RED}[4] Remove user (Delete)                     ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[0] Back to Main Menu                        ${PURPLE}│${NC}"
+    echo -e "${PURPLE}└──────────────────────────────────────────────┘${NC}"
+}
+
 while true; do
-    echo -e "\n${PURPLE}--- User Management (Configure Clients) ---${NC}"
-    echo "[1] List users"
-    echo "[2] Check configuration (Show QR/Text)"
-    echo "[3] Edit configuration"
-    echo "${RED}[4] Remove user (Delete)${NC}"
-    echo "[0] Back to Main Menu"
+    clear
+    print_menu
     echo -en "${GREEN}Option: ${NC}"
     read -r opt
     case "$opt" in
@@ -195,4 +212,8 @@ while true; do
         0) break ;;
         *) echo -e "${RED}Invalid option.${NC}" ;;
     esac
+    if [[ "$opt" != "0" ]]; then
+        echo
+        read -n 1 -s -r -p "Press any key to continue..."
+    fi
 done
