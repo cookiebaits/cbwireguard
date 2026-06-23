@@ -217,6 +217,10 @@ setup_tproxy_routing() {
     ip rule add fwmark 1 table 100 2>/dev/null || true
     ip route add local 0.0.0.0/0 dev lo table 100 2>/dev/null || true
 
+    # Loosening rp_filter for TProxy compatibility
+    sysctl -w net.ipv4.conf.all.rp_filter=2 2>/dev/null || true
+    sysctl -w net.ipv4.conf.default.rp_filter=2 2>/dev/null || true
+
     # Iptables Mangle Rules for TProxy
     local wg_subnet
     wg_subnet=$(grep "^Address" /etc/wireguard/wg0.conf | awk '{print $3}' | cut -d/ -f1 | sed 's/\.[0-9]\+$/.0\/24/' || echo "10.18.0.0/24")
@@ -237,8 +241,29 @@ setup_tproxy_routing() {
     # Persist in wg0.conf if exists
     if [[ -f "/etc/wireguard/wg0.conf" ]]; then
         if ! grep -q "V2RAY" /etc/wireguard/wg0.conf; then
-            sed -i "/PostUp = iptables -t nat -A POSTROUTING/a PostUp = ip rule add fwmark 1 table 100 || true; ip route add local 0.0.0.0/0 dev lo table 100 || true; iptables -t mangle -N V2RAY || true; iptables -t mangle -F V2RAY; iptables -t mangle -A V2RAY -d 127.0.0.0/8 -j RETURN; iptables -t mangle -A V2RAY -d $wg_subnet -j RETURN; iptables -t mangle -A PREROUTING -i wg0 -p tcp -j V2RAY; iptables -t mangle -A PREROUTING -i wg0 -p udp -j V2RAY; iptables -t mangle -A V2RAY -p tcp -j TPROXY --on-port 12345 --tproxy-mark 1; iptables -t mangle -A V2RAY -p udp -j TPROXY --on-port 12345 --tproxy-mark 1" /etc/wireguard/wg0.conf
-            sed -i "/PreDown = iptables -t nat -D POSTROUTING/a PreDown = iptables -t mangle -D PREROUTING -i wg0 -p tcp -j V2RAY || true; iptables -t mangle -D PREROUTING -i wg0 -p udp -j V2RAY || true; iptables -t mangle -F V2RAY || true; iptables -t mangle -X V2RAY || true; ip rule del fwmark 1 table 100 || true; ip route del local 0.0.0.0/0 dev lo table 100 || true" /etc/wireguard/wg0.conf
+            cat <<EOF >> /etc/wireguard/wg0.conf
+
+# V2RAY_START
+PostUp = ip rule add fwmark 1 table 100 || true
+PostUp = ip route add local 0.0.0.0/0 dev lo table 100 || true
+PostUp = sysctl -w net.ipv4.conf.all.rp_filter=2 || true
+PostUp = iptables -t mangle -N V2RAY || true
+PostUp = iptables -t mangle -F V2RAY
+PostUp = iptables -t mangle -A V2RAY -d 127.0.0.0/8 -j RETURN
+PostUp = iptables -t mangle -A V2RAY -d $wg_subnet -j RETURN
+PostUp = iptables -t mangle -A PREROUTING -i wg0 -p tcp -j V2RAY
+PostUp = iptables -t mangle -A PREROUTING -i wg0 -p udp -j V2RAY
+PostUp = iptables -t mangle -A V2RAY -p tcp -j TPROXY --on-port 12345 --tproxy-mark 1
+PostUp = iptables -t mangle -A V2RAY -p udp -j TPROXY --on-port 12345 --tproxy-mark 1
+
+PreDown = iptables -t mangle -D PREROUTING -i wg0 -p tcp -j V2RAY || true
+PreDown = iptables -t mangle -D PREROUTING -i wg0 -p udp -j V2RAY || true
+PreDown = iptables -t mangle -F V2RAY || true
+PreDown = iptables -t mangle -X V2RAY || true
+PreDown = ip rule del fwmark 1 table 100 || true
+PreDown = ip route del local 0.0.0.0/0 dev lo table 100 || true
+# V2RAY_END
+EOF
         fi
     fi
 }
@@ -268,21 +293,21 @@ test_integration() {
     fi
 
     # 2. Port check
-    if ss -lnup | grep -q ":8888 "; then
+    if ss -lnup | grep -q ":8888"; then
         echo -e "[PASS] V2Ray Stealth UDP Port (8888) is listening."
     else
         echo -e "${RED}[FAIL] V2Ray Stealth UDP Port (8888) is NOT listening.${NC}"
         errors=$((errors + 1))
     fi
 
-    if ss -lnpt | grep -q ":8880 "; then
+    if ss -lnpt | grep -q ":8880"; then
         echo -e "[PASS] V2Ray VMess Port (8880) is listening."
     else
         echo -e "${RED}[FAIL] V2Ray VMess Port (8880) is NOT listening.${NC}"
         errors=$((errors + 1))
     fi
 
-    if ss -lnp | grep -q ":12345 "; then
+    if ss -lnp | grep -q ":12345"; then
         echo -e "[PASS] V2Ray TProxy Port (12345) is listening."
     else
         echo -e "${RED}[FAIL] V2Ray TProxy Port (12345) is NOT listening.${NC}"
@@ -341,8 +366,8 @@ start_v2ray() {
     mkdir -p /etc/systemd/system/v2ray.service.d
     cat <<EOF > /etc/systemd/system/v2ray.service.d/10-capabilities.conf
 [Service]
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 NoNewPrivileges=true
 EOF
 
@@ -368,8 +393,11 @@ uninstall_v2ray() {
     ip rule del fwmark 1 table 100 2>/dev/null || true
     ip route del local 0.0.0.0/0 dev lo table 100 2>/dev/null || true
 
+    # Restoring kernel parameters
+    sysctl -w net.ipv4.conf.all.rp_filter=1 2>/dev/null || true
+
     if [[ -f "/etc/wireguard/wg0.conf" ]]; then
-        sed -i "/V2RAY/d" /etc/wireguard/wg0.conf
+        sed -i "/# V2RAY_START/,/# V2RAY_END/d" /etc/wireguard/wg0.conf
     fi
 
     if command -v ufw >/dev/null; then

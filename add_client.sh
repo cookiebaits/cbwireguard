@@ -80,6 +80,8 @@ MTU=${SERVER_MTU:-$MTU}
 # Use V2Ray UDP Relay port (8888) if V2Ray is installed for extra stealth
 if [[ "$HAS_V2RAY" == true ]]; then
     IP_PORT="$IP_ADR:8888"
+    # Lower MTU for nested UDP tunnels
+    MTU=1200
 else
     IP_PORT="$IP_ADR:$PORT"
 fi
