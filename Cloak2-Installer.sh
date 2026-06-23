@@ -208,6 +208,12 @@ EOF
     systemctl enable shadowsocks-rust-server
 }
 
+print_banner() {
+    echo -e "${PURPLE}======================================================${NC}"
+    echo -e "${GREEN}       🍪 Cloak + Shadowsocks Secure Installer${NC}"
+    echo -e "${PURPLE}======================================================${NC}"
+}
+
 function DownloadCloak() {
     echo -e "${GREEN}Downloading Cloak binaries...${NC}"
     local server_url client_url
@@ -221,15 +227,19 @@ function DownloadCloak() {
 
 if [ -d "/etc/cloak" ]; then
     clear
-    echo -e "${GREEN}Looks like you have installed Cloak. Choose an action:${NC}"
-    echo "1) Add User"
-    echo "2) Remove User"
-    echo "3) Show UIDs"
-    echo "4) Show Connections for Shadowsocks Users"
-    echo "5) Change Forwarding Rules"
-    echo "6) Regenerate Firewall Rules"
-    echo "7) Update Cloak"
-    echo "${RED}8) Uninstall Cloak${NC}"
+    print_banner
+    echo -e "${PURPLE}┌────────────────────────────────────────────────────┐${NC}"
+    echo -e "${PURPLE}│            Cloak Management Actions                │${NC}"
+    echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
+    echo -e "${PURPLE}│ ${NC}[1] Add User                                     ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[2] Remove User                                  ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[3] Show UIDs                                    ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[4] Show Connections for Shadowsocks Users       ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[5] Change Forwarding Rules                       ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[6] Regenerate Firewall Rules                    ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[7] Update Cloak                                 ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${RED}[8] Uninstall Cloak                              ${PURPLE}│${NC}"
+    echo -e "${PURPLE}└────────────────────────────────────────────────────┘${NC}"
     read -r -p "Please enter a number: " OPTION
     
     cd /etc/cloak || exit 2
@@ -288,13 +298,14 @@ if [ -d "/etc/cloak" ]; then
 fi
 
 clear
-echo -e "${PURPLE}Cloak + Shadowsocks Secure Installer${NC}"
-echo
-
-echo -e "${GREEN}Choose Cloak Listening Port:${NC}"
-echo "[1] 443 (HTTPS - Recommended)"
-echo "[2] 80 (HTTP)"
-echo "[3] 8443 (Alt-HTTPS)"
+print_banner
+echo -e "${PURPLE}┌────────────────────────────────────────────────────┐${NC}"
+echo -e "${PURPLE}│             Cloak Listening Port Selection         │${NC}"
+echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
+echo -e "${PURPLE}│ ${NC}[1] 443 (HTTPS - Recommended)                    ${PURPLE}│${NC}"
+echo -e "${PURPLE}│ ${NC}[2] 80 (HTTP)                                    ${PURPLE}│${NC}"
+echo -e "${PURPLE}│ ${NC}[3] 8443 (Alt-HTTPS)                              ${PURPLE}│${NC}"
+echo -e "${PURPLE}└────────────────────────────────────────────────────┘${NC}"
 echo -en "${PURPLE}Select option [1-3] or enter custom port: ${NC}"
 read -r input_PORT
 
@@ -324,9 +335,23 @@ esac
 GetArch
 declare -A proxyBook
 
-read -r -p "Install Shadowsocks with Cloak plugin? (y/n): " -e -i "y" OPTION
-if [[ "$OPTION" =~ ^[Yy]$ ]]; then
-    SHADOWSOCKS=true
+echo -e "\n${GREEN}Select components to install:${NC}"
+echo "[1] Shadowsocks + Cloak (Full Stealth - Recommended)"
+echo "[2] Shadowsocks Only"
+echo "[3] Cloak Only (Advanced)"
+echo -en "${PURPLE}Select option [1-3] [Default 1]: ${NC}"
+read -r input_COMP
+
+SHADOWSOCKS=false
+CLOAK=false
+
+case "$input_COMP" in
+    2) SHADOWSOCKS=true ;;
+    3) CLOAK=true ;;
+    *) SHADOWSOCKS=true; CLOAK=true ;;
+esac
+
+if [[ "$SHADOWSOCKS" == true ]]; then
     # P2: Secure Cryptographic Password Generation
     read -r -p "Enter Shadowsocks password (leave blank for secure random): " Password
     if [ -z "$Password" ]; then
@@ -340,24 +365,23 @@ if [[ "$OPTION" =~ ^[Yy]$ ]]; then
     proxyBook+=(["shadowsocks"]="t127.0.0.1:$SS_PORT")
 fi
 
-# Dependencies already installed above
+if [[ "$CLOAK" == true ]]; then
+    DownloadCloak
 
-DownloadCloak
+    Local_Address_Book_For_Admin="panel"
+    proxyBook+=(["$Local_Address_Book_For_Admin"]="t127.0.0.1:0")
+    GenerateProxyBook
 
-Local_Address_Book_For_Admin="panel"
-proxyBook+=(["$Local_Address_Book_For_Admin"]="t127.0.0.1:0")
-GenerateProxyBook 
+    mkdir -p /etc/cloak
+    chmod 700 /etc/cloak
+    cd /etc/cloak || exit 1
 
-mkdir -p /etc/cloak
-chmod 700 /etc/cloak
-cd /etc/cloak || exit 1
+    ckauid=$(ck-server -u)
+    ckaauid=$(ck-server -u)
+    ckbuid=$(ck-server -u)
+    IFS=, read -r ckpub ckpv <<<"$(ck-server -k)"
 
-ckauid=$(ck-server -u)
-ckaauid=$(ck-server -u) 
-ckbuid=$(ck-server -u)
-IFS=, read -r ckpub ckpv <<<"$(ck-server -k)"
-
-cat <<JSON > ckserver.json
+    cat <<JSON > ckserver.json
 {
   "ProxyBook": {
     $PROXY_BOOK
@@ -374,12 +398,12 @@ cat <<JSON > ckserver.json
   "StreamTimeout": 300
 }
 JSON
-chmod 600 ckserver.json
+    chmod 600 ckserver.json
 
-echo "PORT=$PORT" > ckport.txt
-echo "ckaauid=\"$ckaauid\"" >> ckport.txt
+    echo "PORT=$PORT" > ckport.txt
+    echo "ckaauid=\"$ckaauid\"" >> ckport.txt
 
-cat <<JSON > ckadminclient.json
+    cat <<JSON > ckadminclient.json
 {
     "ProxyMethod":"$Local_Address_Book_For_Admin",
     "EncryptionMethod":"plain",
@@ -391,9 +415,9 @@ cat <<JSON > ckadminclient.json
     "StreamTimeout": 300
 }
 JSON
-chmod 600 ckadminclient.json
+    chmod 600 ckadminclient.json
 
-cat <<EOF > /etc/systemd/system/cloak-server.service
+    cat <<EOF > /etc/systemd/system/cloak-server.service
 [Unit]
 Description=Cloak Server Service
 After=network-online.target
@@ -414,19 +438,26 @@ ProtectHome=true
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl start cloak-server
-systemctl enable cloak-server
+    systemctl daemon-reload
+    systemctl start cloak-server
+    systemctl enable cloak-server
+fi
 
 if [[ "$SHADOWSOCKS" == true ]]; then
     if [[ "$distro" =~ (ubuntu|debian|raspbian) ]]; then
         apt-get -y install haveged qrencode >/dev/null
     fi
     DownloadAndInstallSSRust
-    PUBLIC_IP="$(curl -sS https://api.ipify.org || echo "YOUR_IP")"
-    clear
-    ckuid="$ckbuid"
-    ShowConnectionInfo
+    if [[ "$CLOAK" == true ]]; then
+        PUBLIC_IP="$(curl -sS https://api.ipify.org || echo "YOUR_IP")"
+        clear
+        ckuid="$ckbuid"
+        ShowConnectionInfo
+    else
+        PUBLIC_IP="$(curl -sS https://api.ipify.org || echo "YOUR_IP")"
+        echo -e "\n${GREEN}Shadowsocks Connection URL:${NC}"
+        echo "ss://$(printf "aes-256-gcm:$Password" | base64 -w 0)@$PUBLIC_IP:$SS_PORT"
+    fi
 fi
 
 echo -e "${GREEN}Installation Complete!${NC}"

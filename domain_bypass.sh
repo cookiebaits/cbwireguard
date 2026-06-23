@@ -75,15 +75,30 @@ remove_domain() {
     fi
 }
 
+print_banner() {
+    echo -e "${PURPLE}======================================================${NC}"
+    echo -e "${GREEN}       🍪 Domain Bypass Manager (Split Tunneling)${NC}"
+    echo -e "${PURPLE}======================================================${NC}"
+}
+
+print_menu() {
+    echo -e "${PURPLE}┌────────────────────────────────────────────────────┐${NC}"
+    echo -e "${PURPLE}│               Domain Bypass Actions                │${NC}"
+    echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
+    echo -e "${PURPLE}│ ${NC}[1] Add domain to bypass                          ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[2] Remove domain from bypass                     ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[3] List bypass domains                           ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[4] Refresh/Apply routes                          ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[0] Back to Main Menu                             ${PURPLE}│${NC}"
+    echo -e "${PURPLE}└────────────────────────────────────────────────────┘${NC}"
+}
+
 main_menu() {
     init_bypass
     while true; do
-        echo -e "\n${PURPLE}--- Domain Bypass Manager (Split Tunneling) ---${NC}"
-        echo "[1] Add domain to bypass"
-        echo "[2] Remove domain from bypass"
-        echo "[3] List bypass domains"
-        echo "[4] Refresh/Apply routes"
-        echo "[0] Back to Main Menu"
+        clear
+        print_banner
+        print_menu
         echo -en "${GREEN}Option: ${NC}"
         read -r opt
         case "$opt" in
@@ -94,6 +109,10 @@ main_menu() {
             0) break ;;
             *) echo -e "${RED}Invalid option.${NC}" ;;
         esac
+        if [[ "$opt" != "0" ]]; then
+            echo
+            read -n 1 -s -r -p "Press any key to continue..."
+        fi
     done
 }
 

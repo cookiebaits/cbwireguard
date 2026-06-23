@@ -131,14 +131,29 @@ delete_backup() {
     fi
 }
 
+print_banner() {
+    echo -e "${PURPLE}======================================================${NC}"
+    echo -e "${GREEN}       🍪 Cookie's Backup & Restore Manager${NC}"
+    echo -e "${PURPLE}======================================================${NC}"
+}
+
+print_menu() {
+    echo -e "${PURPLE}┌────────────────────────────────────────────────────┐${NC}"
+    echo -e "${PURPLE}│                Backup & Restore Actions            │${NC}"
+    echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
+    echo -e "${PURPLE}│ ${NC}[1] Create a new backup                           ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[2] Restore an existing backup                   ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[3] List existing backup files                  ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${RED}[4] Delete a backup file                         ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[0] Return to Main Menu                          ${PURPLE}│${NC}"
+    echo -e "${PURPLE}└────────────────────────────────────────────────────┘${NC}"
+}
+
 # The Sub-Menu Loop
 while true; do
-    echo -e "\n${GREEN}--- Backup & Restore Manager ---${NC}"
-    echo "[1] Create a new backup"
-    echo "[2] Restore an existing backup"
-    echo "[3] List existing backup files"
-    echo "${RED}[4] Delete a backup file${NC}"
-    echo "[0] Return to Main Menu"
+    clear
+    print_banner
+    print_menu
     echo -en "${GREEN}Select an option [0-4]: ${NC}"
     read -r OPTION
 

@@ -96,11 +96,16 @@ Option: ${NC}"
 
 settings_menu() {
     while true; do
-        echo -e "\n${PURPLE}--- Settings ---${NC}"
-        echo -e "${GREEN}[1] Default MTU: ${NC}${DEFAULT_MTU:-1280}"
-        echo -e "${GREEN}[2] Default DNS: ${NC}${DEFAULT_DNS:-"94.140.14.49, 9.9.9.9, 94.140.14.59"}"
-        echo -e "${GREEN}[3] Default Allowed IPs: ${NC}${DEFAULT_ALLOWED_IPS:-"0.0.0.0/1, 128.0.0.0/1"}"
-        echo -e "${GREEN}[b] Back to Main Menu${NC}"
+        clear
+        print_banner
+        echo -e "${PURPLE}┌────────────────────────────────────────────────────┐${NC}"
+        echo -e "${PURPLE}│                      Settings                      │${NC}"
+        echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
+        printf "${PURPLE}│ ${GREEN}[1] Default MTU: ${NC}%-33s ${PURPLE}│${NC}\n" "${DEFAULT_MTU:-1280}"
+        printf "${PURPLE}│ ${GREEN}[2] Default DNS: ${NC}%-33s ${PURPLE}│${NC}\n" "${DEFAULT_DNS:-"94.140.14.49, 9.9.9.9, 94.140.14.59"}"
+        printf "${PURPLE}│ ${GREEN}[3] Default Allowed IPs: ${NC}%-25s ${PURPLE}│${NC}\n" "${DEFAULT_ALLOWED_IPS:-"0.0.0.0/1, 128.0.0.0/1"}"
+        echo -e "${PURPLE}│ ${GREEN}[b] Back to Main Menu                             ${PURPLE}│${NC}"
+        echo -e "${PURPLE}└────────────────────────────────────────────────────┘${NC}"
         echo -en "${PURPLE}Select option: ${NC}"
         read -r SET_OPT
 
@@ -128,14 +133,36 @@ settings_menu() {
     done
 }
 
+print_banner() {
+    echo -e "${PURPLE}======================================================${NC}"
+    echo -e "${GREEN}       🍪 Cookie's Easy WireGuard Manager${NC}"
+    echo -e "${PURPLE}======================================================${NC}"
+}
+
+print_menu() {
+    echo -e "${PURPLE}┌────────────────────────────────────────────────────┐${NC}"
+    echo -e "${PURPLE}│                  Main Menu Actions                 │${NC}"
+    echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
+    echo -e "${PURPLE}│ ${NC}[1] Setup WireGuard server                        ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[2] Add new client (peer)                         ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[3] Show client (peer) QR                         ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[4] Configure clients (Check/Edit/Remove)         ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[5] Backup & Restore Manager                      ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[6] Domain-Based Split Tunneling                  ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[7] Install/Manage Cloak (Stealth Plugin)         ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[s] Settings (MTU, DNS, AllowedIPs)               ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${RED}[r] Remove WireGuard server from this system      ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[q] Exit                                          ${PURPLE}│${NC}"
+    echo -e "${PURPLE}└────────────────────────────────────────────────────┘${NC}"
+}
+
 main() {
     # Loop the main menu so it returns after completing a task
     while true; do
         clear
-        echo -e "${PURPLE}======================================================${NC}"
-        echo -e "${GREEN}       🍪 Cookie's Easy WireGuard Manager${NC}"
-        echo -e "${PURPLE}======================================================${NC}"
-        display_menu
+        print_banner
+        print_menu
+        echo -en "${GREEN}Option: ${NC}"
         read -r OPTION
 
         case "$OPTION" in
