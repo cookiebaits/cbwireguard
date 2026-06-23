@@ -72,11 +72,17 @@ get_public_ip() {
     dig +short myip.opendns.com @resolver1.opendns.com 2>/dev/null || echo "UNKNOWN_IP"
 }
 IP_ADR=$(get_public_ip)
-PORT=$(grep -i "^ListenPort" /etc/wireguard/wg0.conf | awk '{print $3}')
+PORT=$(grep -i "^ListenPort" /etc/wireguard/wg0.conf | awk '{print $3}' || echo "51820")
 # P3: Respect MTU from server config if it exists
 SERVER_MTU=$(grep -i "^MTU" /etc/wireguard/wg0.conf | awk '{print $3}' || echo "$MTU")
 MTU=${SERVER_MTU:-$MTU}
-IP_PORT="$IP_ADR:$PORT"
+
+# Use V2Ray UDP Relay port (8888) if V2Ray is installed for extra stealth
+if [[ "$HAS_V2RAY" == true ]]; then
+    IP_PORT="$IP_ADR:8888"
+else
+    IP_PORT="$IP_ADR:$PORT"
+fi
 
 SERVER_PRIVATE_IP_PREFIX="10.18.0"
 LAST_IP=$(grep -oP "AllowedIPs\s*=\s*10\.18\.0\.\K[0-9]+" /etc/wireguard/wg0.conf | sort -n | tail -n 1 || true)

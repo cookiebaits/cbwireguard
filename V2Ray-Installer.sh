@@ -45,6 +45,17 @@ generate_config() {
   "inbounds": [
     {
       "port": 8888,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "127.0.0.1",
+        "port": $wg_port,
+        "network": "udp",
+        "followRedirect": false
+      },
+      "tag": "stealth-udp-in"
+    },
+    {
+      "port": 8880,
       "protocol": "vmess",
       "tag": "vmess-in",
       "settings": {
@@ -228,6 +239,7 @@ setup_firewall() {
     if command -v ufw >/dev/null; then
         echo -e "${GREEN}Configuring UFW for V2Ray...${NC}"
         ufw allow 8888/udp
+        ufw allow 8880/tcp
         ufw allow 12345
     fi
 }
@@ -245,14 +257,21 @@ test_integration() {
     fi
 
     # 2. Port check
-    if ss -lnpt | grep -q ":8888 "; then
-        echo -e "[PASS] V2Ray Stealth Port (8888) is listening."
+    if ss -lnup | grep -q ":8888 "; then
+        echo -e "[PASS] V2Ray Stealth UDP Port (8888) is listening."
     else
-        echo -e "${RED}[FAIL] V2Ray Stealth Port (8888) is NOT listening.${NC}"
+        echo -e "${RED}[FAIL] V2Ray Stealth UDP Port (8888) is NOT listening.${NC}"
         errors=$((errors + 1))
     fi
 
-    if ss -lnpt | grep -q ":12345 "; then
+    if ss -lnpt | grep -q ":8880 "; then
+        echo -e "[PASS] V2Ray VMess Port (8880) is listening."
+    else
+        echo -e "${RED}[FAIL] V2Ray VMess Port (8880) is NOT listening.${NC}"
+        errors=$((errors + 1))
+    fi
+
+    if ss -lnp | grep -q ":12345 "; then
         echo -e "[PASS] V2Ray TProxy Port (12345) is listening."
     else
         echo -e "${RED}[FAIL] V2Ray TProxy Port (12345) is NOT listening.${NC}"
@@ -318,6 +337,7 @@ uninstall_v2ray() {
 
     if command -v ufw >/dev/null; then
         ufw delete allow 8888/udp || true
+        ufw delete allow 8880/tcp || true
         ufw delete allow 12345 || true
     fi
 }
