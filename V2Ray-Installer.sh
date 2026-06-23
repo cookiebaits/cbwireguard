@@ -227,7 +227,8 @@ setup_tproxy_routing() {
 setup_firewall() {
     if command -v ufw >/dev/null; then
         echo -e "${GREEN}Configuring UFW for V2Ray...${NC}"
-        ufw allow 8888/tcp
+        ufw allow 8888/udp
+        ufw allow 12345
     fi
 }
 
@@ -263,6 +264,20 @@ test_integration() {
         echo -e "[PASS] Iptables V2RAY mangle chain is present."
     else
         echo -e "${RED}[FAIL] Iptables V2RAY mangle chain is MISSING.${NC}"
+        errors=$((errors + 1))
+    fi
+
+    # 4. WireGuard Interface & Data Check
+    if ip link show wg0 >/dev/null 2>&1; then
+        echo -e "[PASS] WireGuard interface (wg0) is UP."
+        # Check if there is any traffic (handshake or data)
+        if wg show wg0 transfer >/dev/null 2>&1; then
+             echo -e "[INFO] WireGuard transfer data detected."
+        else
+             echo -e "${PURPLE}[NOTE] No WireGuard transfer data detected yet. This is normal for a new setup.${NC}"
+        fi
+    else
+        echo -e "${RED}[FAIL] WireGuard interface (wg0) is DOWN.${NC}"
         errors=$((errors + 1))
     fi
 
@@ -302,7 +317,8 @@ uninstall_v2ray() {
     fi
 
     if command -v ufw >/dev/null; then
-        ufw delete allow 8888/tcp || true
+        ufw delete allow 8888/udp || true
+        ufw delete allow 12345 || true
     fi
 }
 
