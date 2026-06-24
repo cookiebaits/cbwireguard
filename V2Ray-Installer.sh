@@ -88,7 +88,8 @@ generate_config() {
       "protocol": "dokodemo-door",
       "settings": {
         "network": "tcp,udp",
-        "followRedirect": false
+        "followRedirect": true,
+        "userLevel": 0
       },
       "streamSettings": {
         "sockopt": {
@@ -196,6 +197,12 @@ generate_config() {
           "domain:huluim.com",
           "domain:hulustream.com"
         ]
+      },
+      {
+        "type": "field",
+        "inboundTag": ["tproxy-in", "stealth-udp-in"],
+        "outboundTag": "direct",
+        "network": "tcp,udp"
       }
     ]
   }
@@ -214,9 +221,17 @@ setup_tproxy_rules() {
     # Load required modules
     modprobe xt_TPROXY xt_mark xt_multiport iptable_mangle 2>/dev/null || true
 
-    # Loosening rp_filter for TProxy compatibility
-    sysctl -w net.ipv4.conf.all.rp_filter=2
-    sysctl -w net.ipv4.conf.default.rp_filter=2
+    # Loosening rp_filter for TProxy compatibility (TProxy delivers packets
+    # with non-local source addresses; strict rp_filter would drop them).
+    # Persist in /etc/sysctl.conf so it survives reboot.
+    local sysctl_file="/etc/sysctl.conf"
+    sed -i '/^net\.ipv4\.conf\.\(all\|default\|wg0\)\.rp_filter[[:space:]]*=/d' "$sysctl_file"
+    {
+        echo "net.ipv4.conf.all.rp_filter = 2"
+        echo "net.ipv4.conf.default.rp_filter = 2"
+    } >> "$sysctl_file"
+    sysctl -w net.ipv4.conf.all.rp_filter=2 >/dev/null
+    sysctl -w net.ipv4.conf.default.rp_filter=2 >/dev/null
     for i in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 2 > "$i" 2>/dev/null || true; done
 
     # TProxy Routing Table
@@ -230,9 +245,13 @@ setup_tproxy_rules() {
     local wg_subnet
     wg_subnet=$(grep "^Address" /etc/wireguard/wg0.conf | awk '{print $3}' | cut -d/ -f1 | sed 's/\.[0-9]\+$/.0\/24/' || echo "10.18.0.0/24")
 
-    # Applying rules immediately
+    # MSS clamping: FORWARD covers regular forwarded TCP, OUTPUT covers
+    # TProxy reply packets that V2Ray injects from local sockets to wg0.
     iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || \
     iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+
+    iptables -t mangle -C OUTPUT -o wg0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || \
+    iptables -t mangle -A OUTPUT -o wg0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 
     iptables -t mangle -N DIVERT 2>/dev/null || true
     iptables -t mangle -F DIVERT
@@ -266,9 +285,20 @@ setup_tproxy_rules() {
     iptables -t mangle -C PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY 2>/dev/null || \
     iptables -t mangle -I PREROUTING 1 -i wg0 -p udp -m mark ! --mark 255 -j V2RAY
 
-    # Persist in wg0.conf
+    # Persist in wg0.conf (idempotent: strip any previous V2RAY block first)
     if [[ -f "/etc/wireguard/wg0.conf" ]]; then
         sed -i "/# V2RAY_START/,/# V2RAY_END/d" /etc/wireguard/wg0.conf
+        # Remove any trailing blank lines so the block appends cleanly
+        sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' /etc/wireguard/wg0.conf
+
+        # Build the optional public-IP exclusion line conditionally
+        local public_ip_postup=""
+        local public_ip_predown=""
+        if [[ -n "$public_ip" ]]; then
+            public_ip_postup="PostUp = iptables -t mangle -A V2RAY -d ${public_ip} -j RETURN"
+            public_ip_predown="PreDown = iptables -t mangle -D V2RAY -d ${public_ip} -j RETURN || true"
+        fi
+
         cat <<EOF >> /etc/wireguard/wg0.conf
 
 # V2RAY_START
@@ -277,45 +307,39 @@ PostUp = ip rule add fwmark 1 table 100 2>/dev/null || true
 PostUp = ip route add local default dev lo table 100 2>/dev/null || true
 PostUp = sysctl -w net.ipv4.conf.all.rp_filter=2 || true
 PostUp = sysctl -w net.ipv4.conf.default.rp_filter=2 || true
-PostUp = for i in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 2 > "\$i" 2>/dev/null || true; done
+PostUp = sysctl -w net.ipv4.conf.wg0.rp_filter=2 || true
+PostUp = sh -c 'for i in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 2 > "\$i" 2>/dev/null || true; done'
 PostUp = iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+PostUp = iptables -t mangle -A OUTPUT -o wg0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PostUp = iptables -t mangle -N DIVERT 2>/dev/null || true
 PostUp = iptables -t mangle -F DIVERT
 PostUp = iptables -t mangle -A DIVERT -j MARK --set-mark 1
 PostUp = iptables -t mangle -A DIVERT -j ACCEPT
-PostUp = iptables -t mangle -A PREROUTING -p tcp -m socket -j DIVERT 2>/dev/null || true
+PostUp = iptables -t mangle -C PREROUTING -p tcp -m socket -j DIVERT 2>/dev/null || iptables -t mangle -A PREROUTING -p tcp -m socket -j DIVERT
 PostUp = iptables -t mangle -N V2RAY 2>/dev/null || true
 PostUp = iptables -t mangle -F V2RAY
 PostUp = iptables -t mangle -A V2RAY -d 127.0.0.0/8 -j RETURN
-PostUp = iptables -t mangle -A V2RAY -d $wg_subnet -j RETURN
-PostUp = [[ -n "$public_ip" ]] && iptables -t mangle -A V2RAY -d $public_ip -j RETURN || true
+PostUp = iptables -t mangle -A V2RAY -d ${wg_subnet} -j RETURN
+${public_ip_postup}
 PostUp = iptables -t mangle -A V2RAY -p tcp -j TPROXY --on-port 12345 --tproxy-mark 1
 PostUp = iptables -t mangle -A V2RAY -p udp -j TPROXY --on-port 12345 --tproxy-mark 1
-PostUp = iptables -t mangle -I PREROUTING 1 -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY
-PostUp = iptables -t mangle -I PREROUTING 1 -i wg0 -p udp -m mark ! --mark 255 -j V2RAY
+PostUp = iptables -t mangle -C PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY
+PostUp = iptables -t mangle -C PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i wg0 -p udp -m mark ! --mark 255 -j V2RAY
 
 PreDown = iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu || true
+PreDown = iptables -t mangle -D OUTPUT -o wg0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu || true
 PreDown = iptables -t mangle -D PREROUTING -p tcp -m socket -j DIVERT || true
 PreDown = iptables -t mangle -D PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY || true
 PreDown = iptables -t mangle -D PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY || true
+${public_ip_predown}
 PreDown = iptables -t mangle -F V2RAY || true
 PreDown = iptables -t mangle -X V2RAY || true
 PreDown = iptables -t mangle -F DIVERT || true
 PreDown = iptables -t mangle -X DIVERT || true
 PreDown = ip rule del fwmark 1 table 100 || true
-PreDown = ip route del local 0.0.0.0/0 dev lo table 100 || true
+PreDown = ip route del local default dev lo table 100 || true
 # V2RAY_END
 EOF
-            # Safely insert at beginning of [Interface] section
-            local temp_wg
-            temp_wg=$(mktemp)
-            grep -v "# V2RAY_" /etc/wireguard/wg0.conf > "$temp_wg" || true
-            mv "$temp_wg" /etc/wireguard/wg0.conf
-
-            # Using marker injection
-            sed -i "/^\[Interface\]/a # V2RAY_CONFIG_INJECTED" /etc/wireguard/wg0.conf
-            # Wait, better approach is just let it append and manually manage it
-        fi
     fi
 }
 
