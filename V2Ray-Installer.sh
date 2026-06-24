@@ -45,6 +45,7 @@ generate_config() {
   "inbounds": [
     {
       "port": 8888,
+      "listen": "0.0.0.0",
       "protocol": "dokodemo-door",
       "settings": {
         "address": "127.0.0.1",
@@ -52,10 +53,15 @@ generate_config() {
         "network": "udp",
         "followRedirect": false
       },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls"]
+      },
       "tag": "stealth-udp-in"
     },
     {
       "port": 8880,
+      "listen": "0.0.0.0",
       "protocol": "vmess",
       "tag": "vmess-in",
       "settings": {
@@ -75,14 +81,12 @@ generate_config() {
       },
       "sniffing": {
         "enabled": true,
-        "destOverride": [
-          "http",
-          "tls"
-        ]
+        "destOverride": ["http", "tls"]
       }
     },
     {
       "port": 12345,
+      "listen": "0.0.0.0",
       "protocol": "dokodemo-door",
       "settings": {
         "network": "tcp,udp",
@@ -96,10 +100,7 @@ generate_config() {
       },
       "sniffing": {
         "enabled": true,
-        "destOverride": [
-          "http",
-          "tls"
-        ]
+        "destOverride": ["http", "tls"]
       },
       "tag": "tproxy-in"
     }
@@ -113,7 +114,8 @@ generate_config() {
       "tag": "direct",
       "streamSettings": {
         "sockopt": {
-          "mark": 255
+          "mark": 255,
+          "tproxy": "tproxy"
         }
       }
     },
@@ -225,19 +227,6 @@ setup_tproxy_routing() {
     local wg_subnet
     wg_subnet=$(grep "^Address" /etc/wireguard/wg0.conf | awk '{print $3}' | cut -d/ -f1 | sed 's/\.[0-9]\+$/.0\/24/' || echo "10.18.0.0/24")
 
-    iptables -t mangle -N V2RAY 2>/dev/null || true
-    iptables -t mangle -F V2RAY
-    iptables -t mangle -A V2RAY -d 127.0.0.0/8 -j RETURN
-    iptables -t mangle -A V2RAY -d "$wg_subnet" -j RETURN
-
-    # Direct wg0 traffic to V2RAY chain
-    iptables -t mangle -A PREROUTING -i wg0 -p tcp -j V2RAY
-    iptables -t mangle -A PREROUTING -i wg0 -p udp -j V2RAY
-
-    # TProxy to port 12345
-    iptables -t mangle -A V2RAY -p tcp -j TPROXY --on-port 12345 --tproxy-mark 1
-    iptables -t mangle -A V2RAY -p udp -j TPROXY --on-port 12345 --tproxy-mark 1
-
     # Persist in wg0.conf if exists
     if [[ -f "/etc/wireguard/wg0.conf" ]]; then
         if ! grep -q "V2RAY" /etc/wireguard/wg0.conf; then
@@ -247,17 +236,20 @@ setup_tproxy_routing() {
 PostUp = ip rule add fwmark 1 table 100 || true
 PostUp = ip route add local 0.0.0.0/0 dev lo table 100 || true
 PostUp = sysctl -w net.ipv4.conf.all.rp_filter=2 || true
+PostUp = sysctl -w net.ipv4.conf.default.rp_filter=2 || true
+PostUp = iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PostUp = iptables -t mangle -N V2RAY || true
 PostUp = iptables -t mangle -F V2RAY
 PostUp = iptables -t mangle -A V2RAY -d 127.0.0.0/8 -j RETURN
 PostUp = iptables -t mangle -A V2RAY -d $wg_subnet -j RETURN
-PostUp = iptables -t mangle -A PREROUTING -i wg0 -p tcp -j V2RAY
-PostUp = iptables -t mangle -A PREROUTING -i wg0 -p udp -j V2RAY
+PostUp = iptables -t mangle -A PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY
+PostUp = iptables -t mangle -A PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY
 PostUp = iptables -t mangle -A V2RAY -p tcp -j TPROXY --on-port 12345 --tproxy-mark 1
 PostUp = iptables -t mangle -A V2RAY -p udp -j TPROXY --on-port 12345 --tproxy-mark 1
 
-PreDown = iptables -t mangle -D PREROUTING -i wg0 -p tcp -j V2RAY || true
-PreDown = iptables -t mangle -D PREROUTING -i wg0 -p udp -j V2RAY || true
+PreDown = iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu || true
+PreDown = iptables -t mangle -D PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY || true
+PreDown = iptables -t mangle -D PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY || true
 PreDown = iptables -t mangle -F V2RAY || true
 PreDown = iptables -t mangle -X V2RAY || true
 PreDown = ip rule del fwmark 1 table 100 || true
@@ -282,7 +274,8 @@ test_integration() {
     local errors=0
 
     # Give V2Ray a moment to bind ports
-    sleep 3
+    echo "Waiting 5 seconds for V2Ray to initialize..."
+    sleep 5
 
     # 1. Service check
     if systemctl is-active --quiet v2ray; then
@@ -345,12 +338,12 @@ test_integration() {
     if [[ $errors -ne 0 ]]; then
         echo -e "${RED}\nIntegration Error: Some checks failed. Please review the logs above.${NC}"
         echo -en "${GREEN}\nPress Enter to return to menu...${NC}"
-        read -r
+        read -r || true
         return 1
     else
         echo -e "${GREEN}\nIntegration Success: V2Ray and WireGuard are working together!${NC}"
         echo -en "${GREEN}\nPress Enter to continue and add users...${NC}"
-        read -r
+        read -r || true
         return 0
     fi
 }
@@ -366,9 +359,11 @@ start_v2ray() {
     mkdir -p /etc/systemd/system/v2ray.service.d
     cat <<EOF > /etc/systemd/system/v2ray.service.d/10-capabilities.conf
 [Service]
+User=root
+Group=root
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
-NoNewPrivileges=true
+NoNewPrivileges=false
 EOF
 
     systemctl daemon-reload
@@ -384,14 +379,6 @@ uninstall_v2ray() {
 
     bash <(curl -Ls https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh) --remove
     rm -rf /usr/local/etc/v2ray
-
-    iptables -t mangle -D PREROUTING -i wg0 -p tcp -j V2RAY 2>/dev/null || true
-    iptables -t mangle -D PREROUTING -i wg0 -p udp -j V2RAY 2>/dev/null || true
-    iptables -t mangle -F V2RAY 2>/dev/null || true
-    iptables -t mangle -X V2RAY 2>/dev/null || true
-
-    ip rule del fwmark 1 table 100 2>/dev/null || true
-    ip route del local 0.0.0.0/0 dev lo table 100 2>/dev/null || true
 
     # Restoring kernel parameters
     sysctl -w net.ipv4.conf.all.rp_filter=1 2>/dev/null || true
