@@ -53,8 +53,9 @@ echo -e "${PURPLE}│ ${NC}[3] 123 (NTP)                                    ${PU
 echo -e "${PURPLE}│ ${NC}[4] 1194 (OpenVPN UDP)                           ${PURPLE}│${NC}"
 echo -e "${PURPLE}│ ${NC}[5] 500 (ISAKMP)                                  ${PURPLE}│${NC}"
 echo -e "${PURPLE}│ ${NC}[6] 4500 (IPsec NAT-T)                            ${PURPLE}│${NC}"
+echo -e "${PURPLE}│ ${NC}[7] 51820 (Standard WireGuard UDP)               ${PURPLE}│${NC}"
 echo -e "${PURPLE}└────────────────────────────────────────────────────┘${NC}"
-echo -en "${PURPLE}Select option [1-6] or enter custom port [Default 443]: ${NC}"
+echo -en "${PURPLE}Select option [1-7] or enter custom port [Default 443]: ${NC}"
 read -r input_VPN_PORT
 
 while true; do
@@ -65,6 +66,7 @@ while true; do
         4) PORT="1194" ;;
         5) PORT="500" ;;
         6) PORT="4500" ;;
+        7) PORT="51820" ;;
     "") PORT="443" ;;
         *)
             if [[ "$input_VPN_PORT" =~ ^[0-9]+$ ]]; then
@@ -210,4 +212,11 @@ echo -e "\n${PURPLE}======================================================${NC}"
 echo -e "${GREEN}Full Server Setup Complete!${NC}"
 echo -e "${PURPLE}Your WireGuard server is running on port: ${PORT}${NC}"
 echo -e "${PURPLE}Integrated V2Ray (TProxy + Streaming) is active.${NC}"
+echo -e "${PURPLE}------------------------------------------------------${NC}"
+echo -e "${PURPLE}EXTERNAL FIREWALL NOTICE:${NC}"
+echo -e "${PURPLE}Please ensure the following ports are allowed in your${NC}"
+echo -e "${PURPLE}hosting provider's console (e.g., AWS, GCP, Oracle):${NC}"
+echo -e "${GREEN}- $PORT/UDP (WireGuard Core)${NC}"
+echo -e "${GREEN}- 8888/UDP (V2Ray Stealth Entry)${NC}"
+echo -e "${GREEN}- 8880/TCP (V2Ray VMess Entry)${NC}"
 echo -e "${PURPLE}======================================================${NC}\n"
