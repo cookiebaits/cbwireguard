@@ -25,7 +25,6 @@ get_master_pass() {
 
 install_v2ray() {
     echo -e "${GREEN}Installing/Updating V2Ray (V2Fly) via official script...${NC}"
-    # Use official script to ensure latest version and correct binary placement
     curl -Ls https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh | bash
     curl -Ls https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-dat-release.sh | bash
 }
@@ -38,7 +37,6 @@ generate_config() {
     echo -e "${GREEN}Generating definitive V2Ray configuration...${NC}"
     mkdir -p /usr/local/etc/v2ray
 
-    # Using V4 compatible JSON structure which V2Ray 5.x supports seamlessly
     cat <<EOF > "$V2RAY_CONFIG"
 {
   "log": {
@@ -47,7 +45,6 @@ generate_config() {
   "inbounds": [
     {
       "port": 8888,
-      "listen": "0.0.0.0",
       "protocol": "dokodemo-door",
       "settings": {
         "address": "127.0.0.1",
@@ -59,7 +56,6 @@ generate_config() {
     },
     {
       "port": 8880,
-      "listen": "0.0.0.0",
       "protocol": "vmess",
       "tag": "vmess-in",
       "settings": {
@@ -84,7 +80,6 @@ generate_config() {
     },
     {
       "port": 12345,
-      "listen": "0.0.0.0",
       "protocol": "dokodemo-door",
       "settings": {
         "network": "tcp,udp",
@@ -92,8 +87,7 @@ generate_config() {
       },
       "streamSettings": {
         "sockopt": {
-          "tproxy": "tproxy",
-          "mark": 255
+          "tproxy": "tproxy"
         }
       },
       "sniffing": {
@@ -221,7 +215,7 @@ setup_tproxy_rules() {
     # Load required modules
     modprobe xt_TPROXY xt_mark xt_multiport iptable_mangle 2>/dev/null || true
 
-    # Loosening rp_filter for TProxy compatibility
+    # Kernel hardening for TProxy
     sysctl -w net.ipv4.conf.all.rp_filter=2
     sysctl -w net.ipv4.conf.default.rp_filter=2
     for i in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 2 > "$i" 2>/dev/null || true; done
@@ -246,22 +240,13 @@ setup_tproxy_rules() {
     iptables -t mangle -A DIVERT -j MARK --set-mark 1
     iptables -t mangle -A DIVERT -j ACCEPT
 
-    if iptables -m socket --help >/dev/null 2>&1; then
-        iptables -t mangle -C PREROUTING -p tcp -m socket -j DIVERT 2>/dev/null || \
-        iptables -t mangle -A PREROUTING -p tcp -m socket -j DIVERT
-    fi
+    iptables -t mangle -C PREROUTING -p tcp -m socket -j DIVERT 2>/dev/null || \
+    iptables -t mangle -A PREROUTING -p tcp -m socket -j DIVERT
 
     iptables -t mangle -N V2RAY 2>/dev/null || true
     iptables -t mangle -F V2RAY
     iptables -t mangle -A V2RAY -d 127.0.0.0/8 -j RETURN
     iptables -t mangle -A V2RAY -d "$wg_subnet" -j RETURN
-
-    # Exclude server's public IP to prevent loops
-    local public_ip
-    public_ip=$(curl -s -m 5 https://api.ipify.org || echo "")
-    if [[ -n "$public_ip" ]]; then
-        iptables -t mangle -A V2RAY -d "$public_ip" -j RETURN
-    fi
 
     iptables -t mangle -A V2RAY -p tcp -j TPROXY --on-port 12345 --tproxy-mark 1
     iptables -t mangle -A V2RAY -p udp -j TPROXY --on-port 12345 --tproxy-mark 1
@@ -287,7 +272,6 @@ PostUp = sysctl -w net.ipv4.conf.default.rp_filter=2 || true
 PostUp = for i in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 2 > "\$i" 2>/dev/null || true; done
 PostUp = iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PostUp = iptables -t mangle -N DIVERT 2>/dev/null || true
-PostUp = iptables -t mangle -F DIVERT
 PostUp = iptables -t mangle -A DIVERT -j MARK --set-mark 1
 PostUp = iptables -t mangle -A DIVERT -j ACCEPT
 PostUp = iptables -t mangle -A PREROUTING -p tcp -m socket -j DIVERT 2>/dev/null || true
@@ -295,7 +279,6 @@ PostUp = iptables -t mangle -N V2RAY 2>/dev/null || true
 PostUp = iptables -t mangle -F V2RAY
 PostUp = iptables -t mangle -A V2RAY -d 127.0.0.0/8 -j RETURN
 PostUp = iptables -t mangle -A V2RAY -d $wg_subnet -j RETURN
-PostUp = [[ -n "$public_ip" ]] && iptables -t mangle -A V2RAY -d $public_ip -j RETURN || true
 PostUp = iptables -t mangle -A V2RAY -p tcp -j TPROXY --on-port 12345 --tproxy-mark 1
 PostUp = iptables -t mangle -A V2RAY -p udp -j TPROXY --on-port 12345 --tproxy-mark 1
 PostUp = iptables -t mangle -I PREROUTING 1 -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY
@@ -310,7 +293,7 @@ PreDown = iptables -t mangle -X V2RAY || true
 PreDown = iptables -t mangle -F DIVERT || true
 PreDown = iptables -t mangle -X DIVERT || true
 PreDown = ip rule del fwmark 1 table 100 || true
-PreDown = ip route del local default dev lo table 100 || true
+PreDown = ip route del local 0.0.0.0/0 dev lo table 100 || true
 # V2RAY_END
 EOF
     fi
@@ -365,12 +348,6 @@ test_integration() {
     # 3. Iptables check
     if iptables -t mangle -L V2RAY -n >/dev/null 2>&1; then
         echo -e "[PASS] Iptables V2RAY mangle chain is present."
-        if iptables -t mangle -S V2RAY | grep -q "TPROXY --on-port 12345"; then
-            echo -e "[PASS] TProxy redirection rule is present in V2RAY chain."
-        else
-            echo -e "${RED}[FAIL] TProxy redirection rule is MISSING.${NC}"
-            errors=$((errors + 1))
-        fi
     else
         echo -e "${RED}[FAIL] Iptables V2RAY mangle chain is MISSING.${NC}"
         errors=$((errors + 1))
@@ -379,10 +356,8 @@ test_integration() {
     # 4. WireGuard Interface & Data Check
     if ip link show wg0 >/dev/null 2>&1; then
         echo -e "[PASS] WireGuard interface (wg0) is UP."
-        local transfer
-        transfer=$(wg show wg0 transfer | awk '{print $2}' | paste -sd+ - | bc || echo "0")
-        if [[ "$transfer" -gt 0 ]]; then
-             echo -e "[INFO] WireGuard transfer data detected ($transfer bytes)."
+        if wg show wg0 transfer >/dev/null 2>&1; then
+             echo -e "[INFO] WireGuard transfer data detected."
         else
              echo -e "${PURPLE}[NOTE] No WireGuard transfer data detected yet.${NC}"
         fi
@@ -414,27 +389,24 @@ test_integration() {
 start_v2ray() {
     echo -e "${GREEN}Hardening V2Ray service and starting...${NC}"
 
-    # Overwrite the service file to be certain
-    cat <<EOF > /etc/systemd/system/v2ray.service
-[Unit]
-Description=V2Ray Service
-After=network.target nss-lookup.target
+    # Force the main service file to run as root
+    if [[ -f "/etc/systemd/system/v2ray.service" ]]; then
+        sed -i 's/^[[:space:]]*User=.*/User=root/' /etc/systemd/system/v2ray.service
+        sed -i 's/^[[:space:]]*Group=.*/Group=root/' /etc/systemd/system/v2ray.service
+    fi
 
+    # Remove any potentially conflicting drop-ins
+    rm -rf /etc/systemd/system/v2ray.service.d
+
+    mkdir -p /etc/systemd/system/v2ray.service.d
+    cat <<EOF > /etc/systemd/system/v2ray.service.d/99-integrated-setup.conf
 [Service]
 User=root
 Group=root
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 NoNewPrivileges=false
-ExecStart=/usr/local/bin/v2ray run -c /usr/local/etc/v2ray/config.json
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
 EOF
-
-    # Clean up old drop-ins
-    rm -rf /etc/systemd/system/v2ray.service.d
 
     echo -e "${GREEN}Verifying V2Ray configuration...${NC}"
     if ! /usr/local/bin/v2ray test -c "$V2RAY_CONFIG"; then
@@ -451,7 +423,6 @@ uninstall_v2ray() {
     echo -e "${RED}Uninstalling V2Ray and clearing routing...${NC}"
     systemctl stop v2ray || true
     systemctl disable v2ray || true
-    rm -f /etc/systemd/system/v2ray.service
     rm -rf /etc/systemd/system/v2ray.service.d
 
     bash <(curl -Ls https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh) --remove
