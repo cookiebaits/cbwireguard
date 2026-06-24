@@ -223,9 +223,19 @@ setup_tproxy_routing() {
     sysctl -w net.ipv4.conf.all.rp_filter=2 2>/dev/null || true
     sysctl -w net.ipv4.conf.default.rp_filter=2 2>/dev/null || true
 
-    # Iptables Mangle Rules for TProxy
     local wg_subnet
     wg_subnet=$(grep "^Address" /etc/wireguard/wg0.conf | awk '{print $3}' | cut -d/ -f1 | sed 's/\.[0-9]\+$/.0\/24/' || echo "10.18.0.0/24")
+
+    # Applying rules immediately for integration test
+    iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+    iptables -t mangle -N V2RAY 2>/dev/null || true
+    iptables -t mangle -F V2RAY
+    iptables -t mangle -A V2RAY -d 127.0.0.0/8 -j RETURN
+    iptables -t mangle -A V2RAY -d "$wg_subnet" -j RETURN
+    iptables -t mangle -A PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY 2>/dev/null || true
+    iptables -t mangle -A PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY 2>/dev/null || true
+    iptables -t mangle -A V2RAY -p tcp -j TPROXY --on-port 12345 --tproxy-mark 1
+    iptables -t mangle -A V2RAY -p udp -j TPROXY --on-port 12345 --tproxy-mark 1
 
     # Persist in wg0.conf if exists
     if [[ -f "/etc/wireguard/wg0.conf" ]]; then
@@ -274,8 +284,8 @@ test_integration() {
     local errors=0
 
     # Give V2Ray a moment to bind ports
-    echo "Waiting 5 seconds for V2Ray to initialize..."
-    sleep 5
+    echo "Waiting 10 seconds for V2Ray and kernel to stabilize..."
+    sleep 10
 
     # 1. Service check
     if systemctl is-active --quiet v2ray; then
@@ -286,21 +296,21 @@ test_integration() {
     fi
 
     # 2. Port check
-    if ss -lnup | grep -q ":8888"; then
+    if ss -lnup | grep -E ":8888" >/dev/null 2>&1; then
         echo -e "[PASS] V2Ray Stealth UDP Port (8888) is listening."
     else
         echo -e "${RED}[FAIL] V2Ray Stealth UDP Port (8888) is NOT listening.${NC}"
         errors=$((errors + 1))
     fi
 
-    if ss -lnpt | grep -q ":8880"; then
+    if ss -lnpt | grep -E ":8880" >/dev/null 2>&1; then
         echo -e "[PASS] V2Ray VMess Port (8880) is listening."
     else
         echo -e "${RED}[FAIL] V2Ray VMess Port (8880) is NOT listening.${NC}"
         errors=$((errors + 1))
     fi
 
-    if ss -lnp | grep -q ":12345"; then
+    if ss -lnp | grep -E ":12345" >/dev/null 2>&1; then
         echo -e "[PASS] V2Ray TProxy Port (12345) is listening."
     else
         echo -e "${RED}[FAIL] V2Ray TProxy Port (12345) is NOT listening.${NC}"
@@ -356,6 +366,13 @@ start_v2ray() {
     fi
 
     echo -e "${GREEN}Applying service hardening and starting V2Ray...${NC}"
+
+    # Fix the main service file to run as root if needed
+    if [[ -f "/etc/systemd/system/v2ray.service" ]]; then
+        sed -i 's/^User=.*/User=root/' /etc/systemd/system/v2ray.service
+        sed -i 's/^Group=.*/Group=root/' /etc/systemd/system/v2ray.service
+    fi
+
     mkdir -p /etc/systemd/system/v2ray.service.d
     cat <<EOF > /etc/systemd/system/v2ray.service.d/10-capabilities.conf
 [Service]
