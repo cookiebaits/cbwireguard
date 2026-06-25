@@ -36,32 +36,14 @@ check_port_usage() {
     return 1 # Port is free
 }
 
-print_banner() {
-    echo -e "${PURPLE}======================================================${NC}"
-    echo -e "${GREEN}       🍪 Cookie's WireGuard Server Setup${NC}"
-    echo -e "${PURPLE}======================================================${NC}"
-}
-
-clear
-print_banner
-echo -e "${PURPLE}┌────────────────────────────────────────────────────┐${NC}"
-echo -e "${PURPLE}│      VPN Port Selection (Recommended Stealthy)     │${NC}"
-echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
-echo -e "${PURPLE}│ ${NC}[1] 443 (HTTPS/QUIC - Most Stealthy)             ${PURPLE}│${NC}"
-echo -e "${PURPLE}│ ${NC}[2] 53 (DNS)                                     ${PURPLE}│${NC}"
-echo -e "${PURPLE}│ ${NC}[3] 123 (NTP)                                    ${PURPLE}│${NC}"
-echo -e "${PURPLE}│ ${NC}[4] 1194 (OpenVPN UDP)                           ${PURPLE}│${NC}"
-echo -e "${PURPLE}│ ${NC}[5] 500 (ISAKMP)                                  ${PURPLE}│${NC}"
-echo -e "${PURPLE}│ ${NC}[6] 4500 (IPsec NAT-T)                            ${PURPLE}│${NC}"
-echo -e "${PURPLE}│ ${NC}[7] 51820 (Standard WireGuard UDP)               ${PURPLE}│${NC}"
-echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
-echo -e "${PURPLE}│      CDN/V2Ray Optimized (Cloudflare etc.)         │${NC}"
-echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
-echo -e "${PURPLE}│ ${NC}[8] 8443 (Alt-HTTPS)                             ${PURPLE}│${NC}"
-echo -e "${PURPLE}│ ${NC}[9] 2053, 2083, 2087, 2096 (CDN Mixed)           ${PURPLE}│${NC}"
-echo -e "${PURPLE}│ ${NC}[10] 8080 (Common Proxy)                          ${PURPLE}│${NC}"
-echo -e "${PURPLE}└────────────────────────────────────────────────────┘${NC}"
-echo -en "${PURPLE}Select option [1-10] or enter custom port [Default 443]: ${NC}"
+echo -e "${GREEN}Choose port for VPN (Recommended Stealthy Ports):${NC}"
+echo "[1] 443 (HTTPS/QUIC - Most Stealthy)"
+echo "[2] 53 (DNS)"
+echo "[3] 123 (NTP)"
+echo "[4] 1194 (OpenVPN UDP)"
+echo "[5] 500 (ISAKMP)"
+echo "[6] 4500 (IPsec NAT-T)"
+echo -en "${PURPLE}Select option [1-6] or enter custom port [Default 443]: ${NC}"
 read -r input_VPN_PORT
 
 while true; do
@@ -72,10 +54,6 @@ while true; do
         4) PORT="1194" ;;
         5) PORT="500" ;;
         6) PORT="4500" ;;
-        7) PORT="51820" ;;
-        8) PORT="8443" ;;
-        9) PORT="2053" ;;
-        10) PORT="8080" ;;
     "") PORT="443" ;;
         *)
             if [[ "$input_VPN_PORT" =~ ^[0-9]+$ ]]; then
@@ -110,32 +88,11 @@ if [[ -n "$input_MTU" ]]; then
     MTU="$input_MTU"
 fi
 
-set_sysctl() {
-    local key="$1"
-    local value="$2"
-    if grep -q "^${key}=" /etc/sysctl.conf 2>/dev/null; then
-        sed -i "s|^${key}=.*|${key}=${value}|" /etc/sysctl.conf
-    else
-        echo "${key}=${value}" >> /etc/sysctl.conf
-    fi
-}
-
 SERVER_PRIVATE_IP="10.18.0.1"
 
-# P1: Cleanup old instances before fresh install
-echo -e "${GREEN}Cleaning up any existing WireGuard instances...${NC}"
-if systemctl is-active --quiet wg-quick@wg0.service; then
-    systemctl stop wg-quick@wg0.service
-    systemctl disable wg-quick@wg0.service
-fi
-sed -i '/net.ipv4.ip_forward=1/d' /etc/sysctl.conf
-apt-get purge -y wireguard wireguard-tools >/dev/null 2>&1 || true
-apt-get autoremove -y >/dev/null 2>&1 || true
-rm -rf /etc/wireguard
-
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
-# P2: Removed apt-get update
-apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq bc
+apt-get update -y
+apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq
 
 echo -e "${GREEN}Generating secure encryption keys...${NC}"
 mkdir -p /etc/wireguard
@@ -148,11 +105,7 @@ echo "$SERVER_PRIVATE" > /etc/wireguard/server_private.key
 echo "$SERVER_PUBLIC" > /etc/wireguard/server_public.key
 chmod 600 /etc/wireguard/server_*.key
 
-# P1: Enhanced network device detection
-NETWORK_DEVICE=$(ip route get 8.8.8.8 2>/dev/null | grep -Po '(?<=dev )(\S+)' | head -1)
-if [[ -z "$NETWORK_DEVICE" ]]; then
-    NETWORK_DEVICE=$(ip -o link show | awk -F': ' '{print $2}' | grep -vE 'lo|wg' | head -n1)
-fi
+NETWORK_DEVICE=$(ip route get 8.8.8.8 | grep -Po '(?<=dev )(\S+)' | head -1)
 
 echo -e "${GREEN}Configuring WireGuard interface (wg0)...${NC}"
 cat <<EOF > /etc/wireguard/wg0.conf
@@ -171,17 +124,17 @@ EOF
 
 chmod 600 /etc/wireguard/wg0.conf
 
-echo -e "${GREEN}Optimizing Network & Hardening Security...${NC}"
-set_sysctl "net.ipv4.ip_forward" "1"
-set_sysctl "net.core.default_qdisc" "fq"
-set_sysctl "net.ipv4.tcp_congestion_control" "bbr"
-# Security Hardening
-set_sysctl "net.ipv4.conf.all.rp_filter" "1"
-set_sysctl "net.ipv4.conf.default.rp_filter" "1"
-set_sysctl "net.ipv4.conf.all.accept_redirects" "0"
-set_sysctl "net.ipv4.conf.all.send_redirects" "0"
-set_sysctl "net.ipv4.conf.all.accept_source_route" "0"
-set_sysctl "net.ipv6.conf.all.disable_ipv6" "0"
+echo -e "${GREEN}Optimizing Network Throughput (BBR & Forwarding)...${NC}"
+sed -i '/net.ipv4.ip_forward/d' /etc/sysctl.conf
+sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
+sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
+
+echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+# P2: Harden network stack
+echo "net.ipv4.conf.all.rp_filter=1" >> /etc/sysctl.conf
+echo "net.ipv4.conf.default.rp_filter=1" >> /etc/sysctl.conf
 sysctl -p
 
 echo -e "${GREEN}Configuring UFW Firewall...${NC}"
@@ -201,31 +154,7 @@ if ! systemctl restart wg-quick@wg0.service; then
 fi
 systemctl status --no-pager -l wg-quick@wg0.service
 
-echo -e "\n${GREEN}Installing Integrated Stealth & Streaming Enhancement (V2Ray)...${NC}"
-if [[ ! -f "./V2Ray-Installer.sh" ]]; then
-    echo -e "${GREEN}Fetching V2Ray-Installer.sh...${NC}"
-    GIT_REPO_RAW="https://raw.githubusercontent.com/cookiebaits/cbwireguard/main"
-    curl -sSfL "${GIT_REPO_RAW}/V2Ray-Installer.sh" -o "./V2Ray-Installer.sh" || true
-fi
-
-if [[ -f "./V2Ray-Installer.sh" ]]; then
-    chmod +x ./V2Ray-Installer.sh
-    # Automatically perform installation and configuration
-    # Using --install flag to avoid piping and allow interactive password prompt
-    ./V2Ray-Installer.sh --install
-else
-    echo -e "${RED}Warning: V2Ray-Installer.sh not found. Skipping integrated enhancements.${NC}"
-fi
-
 echo -e "\n${PURPLE}======================================================${NC}"
-echo -e "${GREEN}Full Server Setup Complete!${NC}"
+echo -e "${GREEN}Server Setup Complete!${NC}"
 echo -e "${PURPLE}Your WireGuard server is running on port: ${PORT}${NC}"
-echo -e "${PURPLE}Integrated V2Ray (TProxy + Streaming) is active.${NC}"
-echo -e "${PURPLE}------------------------------------------------------${NC}"
-echo -e "${PURPLE}EXTERNAL FIREWALL NOTICE:${NC}"
-echo -e "${PURPLE}Please ensure the following ports are allowed in your${NC}"
-echo -e "${PURPLE}hosting provider's console (e.g., AWS, GCP, Oracle):${NC}"
-echo -e "${GREEN}- $PORT/UDP (WireGuard Core)${NC}"
-echo -e "${GREEN}- 8888/UDP (V2Ray Stealth Entry)${NC}"
-echo -e "${GREEN}- 8880/TCP (V2Ray VMess Entry)${NC}"
 echo -e "${PURPLE}======================================================${NC}\n"

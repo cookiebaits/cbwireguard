@@ -39,6 +39,13 @@ if [[ "$EUID" -ne 0 ]]; then
     exit 1
 fi
 
+init_environment() {
+    if [[ ! -d "$INSTALL_DIR" ]]; then
+        mkdir -p "$INSTALL_DIR"
+    fi
+    chmod 700 "$INSTALL_DIR" 
+}
+
 fetch_and_run() {
     local script_name="$1"
     local script_path="./${script_name}"
@@ -71,19 +78,29 @@ update_setting() {
     fi
 }
 
+display_menu() {
+    echo -en "\n${GREEN}Choose the action:
+[1] Setup WireGuard server
+[2] Add new client (peer)
+[3] Show client (peer) QR
+[4] Configure clients (Check/Edit/Remove)
+[5] Backup & Restore Manager
+[6] Domain-Based Split Tunneling
+[7] Install/Manage Cloak (Stealth Plugin)
+[s] Settings (MTU, DNS, AllowedIPs)
+${RED}[r] Remove WireGuard server from this system${GREEN}
+[q] Exit
+
+Option: ${NC}"
+}
+
 settings_menu() {
     while true; do
-        clear
-        print_banner
-        echo -e "${PURPLE}┌────────────────────────────────────────────────────┐${NC}"
-        echo -e "${PURPLE}│                      Settings                      │${NC}"
-        echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
-        printf "${PURPLE}│ ${GREEN}[1] Default MTU: ${NC}%-33s ${PURPLE}│${NC}\n" "${DEFAULT_MTU:-1280}"
-        printf "${PURPLE}│ ${GREEN}[2] Default DNS: ${NC}%-33s ${PURPLE}│${NC}\n" "${DEFAULT_DNS:-"94.140.14.49, 9.9.9.9, 94.140.14.59"}"
-        printf "${PURPLE}│ ${GREEN}[3] Default Allowed IPs: ${NC}%-25s ${PURPLE}│${NC}\n" "${DEFAULT_ALLOWED_IPS:-"0.0.0.0/1, 128.0.0.0/1"}"
-        echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
-        echo -e "${PURPLE}│ ${GREEN}[b] Back to Main Menu                             ${PURPLE}│${NC}"
-        echo -e "${PURPLE}└────────────────────────────────────────────────────┘${NC}"
+        echo -e "\n${PURPLE}--- Settings ---${NC}"
+        echo -e "${GREEN}[1] Default MTU: ${NC}${DEFAULT_MTU:-1280}"
+        echo -e "${GREEN}[2] Default DNS: ${NC}${DEFAULT_DNS:-"94.140.14.49, 9.9.9.9, 94.140.14.59"}"
+        echo -e "${GREEN}[3] Default Allowed IPs: ${NC}${DEFAULT_ALLOWED_IPS:-"0.0.0.0/1, 128.0.0.0/1"}"
+        echo -e "${GREEN}[b] Back to Main Menu${NC}"
         echo -en "${PURPLE}Select option: ${NC}"
         read -r SET_OPT
 
@@ -111,35 +128,14 @@ settings_menu() {
     done
 }
 
-print_banner() {
-    echo -e "${PURPLE}======================================================${NC}"
-    echo -e "${GREEN}       🍪 Cookie's Easy WireGuard Manager${NC}"
-    echo -e "${PURPLE}======================================================${NC}"
-}
-
-print_menu() {
-    echo -e "${PURPLE}┌────────────────────────────────────────────────────┐${NC}"
-    echo -e "${PURPLE}│                  Main Menu Actions                 │${NC}"
-    echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
-    echo -e "${PURPLE}│ ${NC}[1] Setup WireGuard Server (Full One-Tap)         ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│ ${NC}[2] Add New Client (Peer)                         ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│ ${NC}[3] Show Client (Peer) QR                         ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│ ${NC}[4] Configure Clients (Check/Edit/Remove)         ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│ ${NC}[5] Backup & Restore Manager                      ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│ ${NC}[6] Domain-Based Split Tunneling                  ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│ ${NC}[s] Settings (MTU, DNS, AllowedIPs)               ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│ ${RED}[r] Remove WireGuard Server from this system      ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│ ${NC}[q] Exit                                          ${PURPLE}│${NC}"
-    echo -e "${PURPLE}└────────────────────────────────────────────────────┘${NC}"
-}
-
 main() {
     # Loop the main menu so it returns after completing a task
     while true; do
         clear
-        print_banner
-        print_menu
-        echo -en "${GREEN}Option: ${NC}"
+        echo -e "${PURPLE}======================================================${NC}"
+        echo -e "${GREEN}       🍪 Cookie's Easy WireGuard Manager${NC}"
+        echo -e "${PURPLE}======================================================${NC}"
+        display_menu
         read -r OPTION
 
         case "$OPTION" in
@@ -148,11 +144,17 @@ main() {
             3)
                 echo -en "${GREEN}Enter device name to show QR: ${NC}"
                 read -r dname
+                # We can reuse user_manager.sh logic or just call a small snippet
+                # For now, let's keep it simple and maybe restore show_qr.sh if needed
+                # or just use user_manager.sh with a flag.
+                # Actually, user_manager.sh has show_user.
+                # Let's just point to a new script that does exactly this or use a flag.
                 MASTER_PASS="" fetch_and_run "user_manager.sh" --show "$dname" || true
                 ;;
             4) fetch_and_run "user_manager.sh" ;;
             5) fetch_and_run "backup_manager.sh" ;;
             6) fetch_and_run "domain_bypass.sh" ;;
+            7) fetch_and_run "Cloak2-Installer.sh" ;;
             s) settings_menu ;;
             r)
                 fetch_and_run "remove_server.sh"
