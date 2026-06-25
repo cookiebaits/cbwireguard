@@ -67,8 +67,7 @@ generate_config() {
   "dns": {
     "servers": [
       "8.8.8.8",
-      "1.1.1.1",
-      "localhost"
+      "1.1.1.1"
     ]
   },
   "inbounds": [
@@ -133,10 +132,6 @@ generate_config() {
   ],
   "outbounds": [
     {
-      "protocol": "dns",
-      "tag": "dns-out"
-    },
-    {
       "protocol": "freedom",
       "settings": {
         "domainStrategy": "UseIP"
@@ -147,6 +142,10 @@ generate_config() {
           "mark": 255
         }
       }
+    },
+    {
+      "protocol": "dns",
+      "tag": "dns-out"
     },
     {
       "protocol": "freedom",
@@ -315,12 +314,12 @@ setup_tproxy_rules() {
     iptables -t mangle -A V2RAY -p tcp -j TPROXY --on-port 12345 --tproxy-mark 1
     iptables -t mangle -A V2RAY -p udp -j TPROXY --on-port 12345 --tproxy-mark 1
 
-    # Redirection from wg0
+    # Redirection from wg0 (Ensuring DIVERT rules are matched before V2RAY TProxy rules)
     iptables -t mangle -C PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY 2>/dev/null || \
-    iptables -t mangle -I PREROUTING 1 -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY
+    iptables -t mangle -A PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY
 
     iptables -t mangle -C PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY 2>/dev/null || \
-    iptables -t mangle -I PREROUTING 1 -i wg0 -p udp -m mark ! --mark 255 -j V2RAY
+    iptables -t mangle -A PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY
 
     # Persist in wg0.conf (idempotent: strip any previous V2RAY block first)
     if [[ -f "/etc/wireguard/wg0.conf" ]]; then
@@ -360,8 +359,8 @@ PostUp = iptables -t mangle -A V2RAY -d ${wg_subnet} -j RETURN
 ${public_ip_postup}
 PostUp = iptables -t mangle -A V2RAY -p tcp -j TPROXY --on-port 12345 --tproxy-mark 1
 PostUp = iptables -t mangle -A V2RAY -p udp -j TPROXY --on-port 12345 --tproxy-mark 1
-PostUp = iptables -t mangle -C PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY
-PostUp = iptables -t mangle -C PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i wg0 -p udp -m mark ! --mark 255 -j V2RAY
+PostUp = iptables -t mangle -C PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY 2>/dev/null || iptables -t mangle -A PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY
+PostUp = iptables -t mangle -C PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY 2>/dev/null || iptables -t mangle -A PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY
 
 PreDown = iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu || true
 PreDown = iptables -t mangle -D OUTPUT -o wg0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu || true
