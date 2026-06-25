@@ -22,6 +22,16 @@ if [[ "$EUID" -ne 0 ]]; then
     exit 1
 fi
 
+
+get_master_pass() {
+    if [[ -z "${MASTER_PASS:-}" ]]; then
+        echo -en "${GREEN}Enter Master Password for Client Encryption/Decryption: ${NC}"
+        read -rs MASTER_PASS
+        echo
+        export MASTER_PASS
+    fi
+}
+
 if [[ ! -f "/etc/wireguard/wg0.conf" ]]; then
     echo -e "${RED}Error: Server configuration not found. Please run setup_server.sh first.${NC}"
     exit 1
@@ -36,25 +46,25 @@ if [[ -z "$DEVICE_NAME" ]]; then
     exit 1
 fi
 
-echo -en "${GREEN}Enable Stealth Mode (WireGuard over Cloak) [y/n]? ${NC}"
+echo -en "${GREEN}Enable Stealth Mode (WireGuard over Xray) [y/n]? ${NC}"
 read -r STEALTH_MODE
 
 if [[ "$STEALTH_MODE" =~ ^[Yy]$ ]]; then
-    if [[ ! -d "/etc/cloak" ]]; then
-        echo -e "${PURPLE}Stealth layer (Cloak) is not installed.${NC}"
+    if [[ ! -d "/usr/local/etc/xray" ]]; then
+        echo -e "${PURPLE}Stealth layer (Xray) is not installed.${NC}"
         echo -en "${GREEN}Would you like to install it now? [y/n]: ${NC}"
         read -r install_cloak
         if [[ "$install_cloak" =~ ^[Yy]$ ]]; then
-            # P2: Ensure Cloak installation works
-            if [[ -f "./Cloak2-Installer.sh" ]]; then
-                chmod +x ./Cloak2-Installer.sh
-                ./Cloak2-Installer.sh
+            # P2: Ensure Xray installation works
+            if [[ -f "./Xray-Installer.sh" ]]; then
+                chmod +x ./Xray-Installer.sh
+                ./Xray-Installer.sh
             else
-                echo -e "${RED}Error: Cloak2-Installer.sh not found in current directory.${NC}"
+                echo -e "${RED}Error: Xray-Installer.sh not found in current directory.${NC}"
                 exit 1
             fi
         else
-            echo -e "${RED}Stealth Mode requires Cloak. Proceeding without Stealth Mode...${NC}"
+            echo -e "${RED}Stealth Mode requires Xray. Proceeding without Stealth Mode...${NC}"
             STEALTH_MODE="n"
         fi
     fi
@@ -91,14 +101,10 @@ CLIENT_IP="$SERVER_PRIVATE_IP_PREFIX.$NEXT_IP"
 CLIENT_CONF="/etc/wireguard/clients/$DEVICE_NAME.conf"
 
 if [[ "$STEALTH_MODE" =~ ^[Yy]$ ]]; then
-    # P2: Advanced Stealth - WireGuard over Cloak (via Shadowsocks)
-    # This requires ck-client and a shadowsocks-rust client configured on the user device
+    # P2: Advanced Stealth - WireGuard over Xray VLESS
+    get_master_pass
+    xray_uuid=$(openssl enc -aes-256-cbc -d -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "/usr/local/etc/xray/client_uuid.enc" 2>/dev/null || echo "UUID_DECRYPTION_FAILED")
     
-    # Collect connection info for instructions
-    ck_port=$(grep "^PORT=" /etc/cloak/ckport.txt | cut -d= -f2 || echo "443")
-    ck_uid=$(grep "^ckaauid=" /etc/cloak/ckport.txt | cut -d= -f2 | tr -d '"' || echo "UID")
-    ss_pass=$(jq -r '.password' /etc/shadowsocks-rust/config.json || echo "PASSWORD")
-
     cat <<EOF > "$CLIENT_CONF"
 [Interface]
 PrivateKey = $DEVICE_PRIVATE
@@ -112,13 +118,12 @@ Endpoint = $IP_ADR:$PORT
 AllowedIPs = $ALLOWED_IPS
 EOF
     echo -e "${PURPLE}======================================================${NC}"
-    echo -e "${GREEN}Stealth Mode Instructions (Advanced Obfuscation):${NC}"
+    echo -e "${GREEN}Stealth Mode Instructions (Xray VLESS):${NC}"
     echo -e "${PURPLE}By default, this config points to the Server IP for standard use.${NC}"
-    echo -e "To enable ${GREEN}Shadowsocks + Cloak${NC} obfuscation (to bypass detection):"
-    echo -e "1. Change the ${GREEN}Endpoint${NC} in your WireGuard app to ${PURPLE}127.0.0.1:1080${NC}"
-    echo -e "2. Run Cloak client on your device: ${PURPLE}ck-client -s $IP_ADR -p $ck_port -a $ck_uid -l 1984 -c ckclient.json &${NC}"
-    echo -e "3. Run Shadowsocks client on your device: ${PURPLE}ss-local -s 127.0.0.1 -p 1984 -l 1080 -k $ss_pass -m aes-256-gcm &${NC}"
-    echo -e "${PURPLE}Note: Windows/Mobile users can use the Cloak plugin inside their Shadowsocks client.${NC}"
+    echo -e "To enable ${GREEN}Xray VLESS${NC} obfuscation (to bypass detection):"
+    echo -e "1. Import this VLESS connection into your Xray client:"
+    echo -e "   ${PURPLE}vless://$xray_uuid@$IP_ADR:8880?encryption=none&security=none&type=ws&path=%2Fvideo#$DEVICE_NAME-stealth${NC}"
+    echo -e "2. Change the ${GREEN}Endpoint${NC} in your WireGuard app to point to your local Xray client's Socks/HTTP proxy or utilize TUN mode."
     echo -e "${PURPLE}======================================================${NC}"
 else
     cat <<EOF > "$CLIENT_CONF"
@@ -149,15 +154,6 @@ EOF
 wg set wg0 peer "$DEVICE_PUBLIC" allowed-ips "$CLIENT_IP/32"
 
 # P3: Encryption of client config
-get_master_pass() {
-    if [[ -z "${MASTER_PASS:-}" ]]; then
-        echo -en "${GREEN}Enter Master Password for Client Encryption: ${NC}"
-        read -rs MASTER_PASS
-        echo
-        export MASTER_PASS
-    fi
-}
-
 encrypt_config() {
     get_master_pass
     openssl enc -aes-256-cbc -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "$CLIENT_CONF" -out "${CLIENT_CONF}.enc"
