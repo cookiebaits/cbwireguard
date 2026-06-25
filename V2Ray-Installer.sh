@@ -369,8 +369,10 @@ PostUp = iptables -t mangle -C PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j 
 PreDown = iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu || true
 PreDown = iptables -t mangle -D OUTPUT -o wg0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu || true
 PreDown = iptables -t mangle -D PREROUTING -p tcp -m socket -j DIVERT || true
-PreDown = iptables -t mangle -D PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY || true
-PreDown = iptables -t mangle -D PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY || true
+PreDown = iptables -t mangle -D PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY 2>/dev/null || true
+PreDown = iptables -t mangle -D PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY 2>/dev/null || true
+PreDown = iptables -t mangle -D PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY 2>/dev/null || true
+PreDown = iptables -t mangle -D PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY 2>/dev/null || true
 ${public_ip_predown}
 PreDown = iptables -t mangle -F V2RAY || true
 PreDown = iptables -t mangle -X V2RAY || true
