@@ -125,7 +125,8 @@ generate_config() {
       },
       "sniffing": {
         "enabled": true,
-        "destOverride": ["http", "tls"]
+        "destOverride": ["http", "tls"],
+        "metadataOnly": false
       },
       "tag": "tproxy-in"
     }
@@ -324,7 +325,7 @@ setup_tproxy_rules() {
     # Persist in wg0.conf (idempotent: strip any previous V2RAY block first)
     if [[ -f "/etc/wireguard/wg0.conf" ]]; then
         sed -i "/# V2RAY_START/,/# V2RAY_END/d" /etc/wireguard/wg0.conf
-        # Remove any trailing blank lines so the block appends cleanly
+        # Remove any trailing blank lines
         sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' /etc/wireguard/wg0.conf
 
         # Build the optional public-IP exclusion line conditionally
@@ -335,8 +336,10 @@ setup_tproxy_rules() {
             public_ip_predown="PreDown = iptables -t mangle -D V2RAY -d ${public_ip} -j RETURN || true"
         fi
 
-        cat <<EOF >> /etc/wireguard/wg0.conf
-
+        # We insert the block immediately after the [Interface] header to ensure
+        # it is parsed correctly before any [Peer] sections.
+        local v2ray_block
+        v2ray_block=$(cat <<EOF
 # V2RAY_START
 PostUp = modprobe xt_TPROXY xt_mark xt_multiport iptable_mangle 2>/dev/null || true
 PostUp = ip rule add fwmark 1 table 100 2>/dev/null || true
@@ -344,6 +347,7 @@ PostUp = ip route add local default dev lo table 100 2>/dev/null || true
 PostUp = sysctl -w net.ipv4.conf.all.rp_filter=2 || true
 PostUp = sysctl -w net.ipv4.conf.default.rp_filter=2 || true
 PostUp = sysctl -w net.ipv4.conf.wg0.rp_filter=2 || true
+PostUp = sysctl -w net.ipv6.conf.wg0.disable_ipv6=1 || true
 PostUp = sh -c 'for i in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 2 > "\$i" 2>/dev/null || true; done'
 PostUp = iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PostUp = iptables -t mangle -A OUTPUT -o wg0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
@@ -376,6 +380,14 @@ PreDown = ip rule del fwmark 1 table 100 || true
 PreDown = ip route del local default dev lo table 100 || true
 # V2RAY_END
 EOF
+)
+        # Use a temporary file to safely insert the block after the [Interface] line
+        # This avoids complex escaping issues with sed's append command
+        local temp_rules
+        temp_rules=$(mktemp)
+        echo "$v2ray_block" > "$temp_rules"
+        sed -i "/^\[Interface\]/r $temp_rules" /etc/wireguard/wg0.conf
+        rm -f "$temp_rules"
     fi
 }
 
@@ -557,6 +569,8 @@ uninstall_v2ray() {
 
     if [[ -f "/etc/wireguard/wg0.conf" ]]; then
         sed -i "/# V2RAY_START/,/# V2RAY_END/d" /etc/wireguard/wg0.conf
+        # Cleanup any extra blank lines left behind
+        sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' /etc/wireguard/wg0.conf
     fi
 
     if command -v ufw >/dev/null; then
