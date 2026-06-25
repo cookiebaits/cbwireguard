@@ -165,8 +165,12 @@ SaveConfig = false
 
 PostUp = ufw route allow in on wg0 out on $NETWORK_DEVICE
 PostUp = iptables -t nat -A POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
+PostUp = iptables -I FORWARD 1 -i wg0 -o $NETWORK_DEVICE -j ACCEPT
+PostUp = iptables -I FORWARD 1 -i $NETWORK_DEVICE -o wg0 -j ACCEPT
 PreDown = ufw route delete allow in on wg0 out on $NETWORK_DEVICE
 PreDown = iptables -t nat -D POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
+PreDown = iptables -D FORWARD -i wg0 -o $NETWORK_DEVICE -j ACCEPT
+PreDown = iptables -D FORWARD -i $NETWORK_DEVICE -o wg0 -j ACCEPT
 EOF
 
 chmod 600 /etc/wireguard/wg0.conf
