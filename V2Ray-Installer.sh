@@ -23,7 +23,27 @@ get_master_pass() {
     fi
 }
 
+check_requirements() {
+    echo -e "${GREEN}Checking system requirements...${NC}"
+    local modules=("xt_TPROXY" "xt_mark" "xt_multiport" "iptable_mangle")
+    local missing=()
+
+    for mod in "${modules[@]}"; do
+        if ! modprobe "$mod" 2>/dev/null; then
+            missing+=("$mod")
+        fi
+    done
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo -e "${RED}Error: The following kernel modules are missing or could not be loaded: ${missing[*]}${NC}"
+        echo -e "${RED}TProxy integration requires these modules. If you are on a VPS (like OpenVZ), please contact your provider.${NC}"
+        return 1
+    fi
+    echo -e "[PASS] All required kernel modules are available."
+}
+
 install_v2ray() {
+    check_requirements || return 1
     echo -e "${GREEN}Installing/Updating V2Ray (V2Fly) via official script...${NC}"
     # Use official script to ensure latest version and correct binary placement
     curl -Ls https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh | bash
@@ -43,6 +63,12 @@ generate_config() {
 {
   "log": {
     "loglevel": "warning"
+  },
+  "dns": {
+    "servers": [
+      "8.8.8.8",
+      "1.1.1.1"
+    ]
   },
   "inbounds": [
     {
@@ -99,7 +125,8 @@ generate_config() {
       },
       "sniffing": {
         "enabled": true,
-        "destOverride": ["http", "tls"]
+        "destOverride": ["http", "tls"],
+        "metadataOnly": false
       },
       "tag": "tproxy-in"
     }
@@ -116,6 +143,10 @@ generate_config() {
           "mark": 255
         }
       }
+    },
+    {
+      "protocol": "dns",
+      "tag": "dns-out"
     },
     {
       "protocol": "freedom",
@@ -141,6 +172,12 @@ generate_config() {
   "routing": {
     "domainStrategy": "IPIfNonMatch",
     "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["tproxy-in"],
+        "port": 53,
+        "outboundTag": "dns-out"
+      },
       {
         "type": "field",
         "outboundTag": "streaming",
@@ -278,17 +315,17 @@ setup_tproxy_rules() {
     iptables -t mangle -A V2RAY -p tcp -j TPROXY --on-port 12345 --tproxy-mark 1
     iptables -t mangle -A V2RAY -p udp -j TPROXY --on-port 12345 --tproxy-mark 1
 
-    # Redirection from wg0
+    # Redirection from wg0 (Ensuring DIVERT rules are matched before V2RAY TProxy rules)
     iptables -t mangle -C PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY 2>/dev/null || \
-    iptables -t mangle -I PREROUTING 1 -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY
+    iptables -t mangle -A PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY
 
     iptables -t mangle -C PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY 2>/dev/null || \
-    iptables -t mangle -I PREROUTING 1 -i wg0 -p udp -m mark ! --mark 255 -j V2RAY
+    iptables -t mangle -A PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY
 
     # Persist in wg0.conf (idempotent: strip any previous V2RAY block first)
     if [[ -f "/etc/wireguard/wg0.conf" ]]; then
         sed -i "/# V2RAY_START/,/# V2RAY_END/d" /etc/wireguard/wg0.conf
-        # Remove any trailing blank lines so the block appends cleanly
+        # Remove any trailing blank lines
         sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' /etc/wireguard/wg0.conf
 
         # Build the optional public-IP exclusion line conditionally
@@ -299,8 +336,10 @@ setup_tproxy_rules() {
             public_ip_predown="PreDown = iptables -t mangle -D V2RAY -d ${public_ip} -j RETURN || true"
         fi
 
-        cat <<EOF >> /etc/wireguard/wg0.conf
-
+        # We insert the block immediately after the [Interface] header to ensure
+        # it is parsed correctly before any [Peer] sections.
+        local v2ray_block
+        v2ray_block=$(cat <<EOF
 # V2RAY_START
 PostUp = modprobe xt_TPROXY xt_mark xt_multiport iptable_mangle 2>/dev/null || true
 PostUp = ip rule add fwmark 1 table 100 2>/dev/null || true
@@ -308,6 +347,7 @@ PostUp = ip route add local default dev lo table 100 2>/dev/null || true
 PostUp = sysctl -w net.ipv4.conf.all.rp_filter=2 || true
 PostUp = sysctl -w net.ipv4.conf.default.rp_filter=2 || true
 PostUp = sysctl -w net.ipv4.conf.wg0.rp_filter=2 || true
+PostUp = sysctl -w net.ipv6.conf.wg0.disable_ipv6=1 || true
 PostUp = sh -c 'for i in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 2 > "\$i" 2>/dev/null || true; done'
 PostUp = iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PostUp = iptables -t mangle -A OUTPUT -o wg0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
@@ -323,8 +363,8 @@ PostUp = iptables -t mangle -A V2RAY -d ${wg_subnet} -j RETURN
 ${public_ip_postup}
 PostUp = iptables -t mangle -A V2RAY -p tcp -j TPROXY --on-port 12345 --tproxy-mark 1
 PostUp = iptables -t mangle -A V2RAY -p udp -j TPROXY --on-port 12345 --tproxy-mark 1
-PostUp = iptables -t mangle -C PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY
-PostUp = iptables -t mangle -C PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i wg0 -p udp -m mark ! --mark 255 -j V2RAY
+PostUp = iptables -t mangle -C PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY 2>/dev/null || iptables -t mangle -A PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY
+PostUp = iptables -t mangle -C PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY 2>/dev/null || iptables -t mangle -A PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY
 
 PreDown = iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu || true
 PreDown = iptables -t mangle -D OUTPUT -o wg0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu || true
@@ -340,6 +380,14 @@ PreDown = ip rule del fwmark 1 table 100 || true
 PreDown = ip route del local default dev lo table 100 || true
 # V2RAY_END
 EOF
+)
+        # Use a temporary file to safely insert the block after the [Interface] line
+        # This avoids complex escaping issues with sed's append command
+        local temp_rules
+        temp_rules=$(mktemp)
+        echo "$v2ray_block" > "$temp_rules"
+        sed -i "/^\[Interface\]/r $temp_rules" /etc/wireguard/wg0.conf
+        rm -f "$temp_rules"
     fi
 }
 
@@ -403,7 +451,39 @@ test_integration() {
         errors=$((errors + 1))
     fi
 
-    # 4. WireGuard Interface & Data Check
+    # 4. Routing Table Check
+    if ip rule show | grep -q "fwmark 0x1 lookup 100"; then
+        echo -e "[PASS] IP rule for fwmark 1 (table 100) is present."
+    else
+        echo -e "${RED}[FAIL] IP rule for fwmark 1 (table 100) is MISSING.${NC}"
+        errors=$((errors + 1))
+    fi
+
+    if ip route show table 100 | grep -q "local default dev lo"; then
+        echo -e "[PASS] TProxy local routing (table 100) is correct."
+    else
+        echo -e "${RED}[FAIL] TProxy local routing (table 100) is INCORRECT or MISSING.${NC}"
+        errors=$((errors + 1))
+    fi
+
+    # 5. RP Filter Check
+    local rp_fail=0
+    for i in /proc/sys/net/ipv4/conf/{all,default,wg0}/rp_filter; do
+        if [[ -f "$i" ]]; then
+            val=$(cat "$i")
+            if [[ "$val" -ne 2 ]]; then
+                echo -e "${RED}[FAIL] rp_filter for $i is $val (expected 2).${NC}"
+                rp_fail=1
+            fi
+        fi
+    done
+    if [[ $rp_fail -eq 0 ]]; then
+        echo -e "[PASS] rp_filter settings are correct (loose mode)."
+    else
+        errors=$((errors + 1))
+    fi
+
+    # 6. WireGuard Interface & Data Check
     if ip link show wg0 >/dev/null 2>&1; then
         echo -e "[PASS] WireGuard interface (wg0) is UP."
         local transfer
@@ -489,6 +569,8 @@ uninstall_v2ray() {
 
     if [[ -f "/etc/wireguard/wg0.conf" ]]; then
         sed -i "/# V2RAY_START/,/# V2RAY_END/d" /etc/wireguard/wg0.conf
+        # Cleanup any extra blank lines left behind
+        sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' /etc/wireguard/wg0.conf
     fi
 
     if command -v ufw >/dev/null; then
