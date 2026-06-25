@@ -315,12 +315,28 @@ setup_tproxy_rules() {
     iptables -t mangle -A V2RAY -p tcp -j TPROXY --on-port 12345 --tproxy-mark 1
     iptables -t mangle -A V2RAY -p udp -j TPROXY --on-port 12345 --tproxy-mark 1
 
+    # 1. Remove the two PREROUTING rules that redirect wg0 traffic into V2Ray.
+    #    Run each twice in case duplicates accumulated from earlier installs.
+    iptables -t mangle -D PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY 2>/dev/null || true
+    iptables -t mangle -D PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY 2>/dev/null || true
+    iptables -t mangle -D PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY 2>/dev/null || true
+    iptables -t mangle -D PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY 2>/dev/null || true
+
+    # 2. Confirm they're gone (should show NO V2RAY targets from wg0)
+    iptables -t mangle -L PREROUTING -v -n | grep -E 'V2RAY|wg0' || true
+
+    # 3. Make sure normal forwarding is allowed and NAT is in place
+    #    (these should already be there from setup_server.sh, but verify)
+    sysctl net.ipv4.ip_forward || true
+    iptables -t nat -L POSTROUTING -v -n | grep MASQUERADE || true
+    iptables -L FORWARD -v -n | head -10 || true
+
     # Redirection from wg0 (Ensuring DIVERT rules are matched before V2RAY TProxy rules)
     iptables -t mangle -C PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY 2>/dev/null || \
-    iptables -t mangle -A PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY
+    iptables -t mangle -I PREROUTING 1 -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY
 
     iptables -t mangle -C PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY 2>/dev/null || \
-    iptables -t mangle -A PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY
+    iptables -t mangle -I PREROUTING 1 -i wg0 -p udp -m mark ! --mark 255 -j V2RAY
 
     # Persist in wg0.conf (idempotent: strip any previous V2RAY block first)
     if [[ -f "/etc/wireguard/wg0.conf" ]]; then
@@ -363,8 +379,8 @@ PostUp = iptables -t mangle -A V2RAY -d ${wg_subnet} -j RETURN
 ${public_ip_postup}
 PostUp = iptables -t mangle -A V2RAY -p tcp -j TPROXY --on-port 12345 --tproxy-mark 1
 PostUp = iptables -t mangle -A V2RAY -p udp -j TPROXY --on-port 12345 --tproxy-mark 1
-PostUp = iptables -t mangle -C PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY 2>/dev/null || iptables -t mangle -A PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY
-PostUp = iptables -t mangle -C PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY 2>/dev/null || iptables -t mangle -A PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY
+PostUp = iptables -t mangle -C PREROUTING -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i wg0 -p tcp -m mark ! --mark 255 -j V2RAY
+PostUp = iptables -t mangle -C PREROUTING -i wg0 -p udp -m mark ! --mark 255 -j V2RAY 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i wg0 -p udp -m mark ! --mark 255 -j V2RAY
 
 PreDown = iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu || true
 PreDown = iptables -t mangle -D OUTPUT -o wg0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu || true
