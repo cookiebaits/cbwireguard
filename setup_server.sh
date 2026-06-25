@@ -53,8 +53,9 @@ echo -e "${PURPLE}│ ${NC}[3] 123 (NTP)                                    ${PU
 echo -e "${PURPLE}│ ${NC}[4] 1194 (OpenVPN UDP)                           ${PURPLE}│${NC}"
 echo -e "${PURPLE}│ ${NC}[5] 500 (ISAKMP)                                  ${PURPLE}│${NC}"
 echo -e "${PURPLE}│ ${NC}[6] 4500 (IPsec NAT-T)                            ${PURPLE}│${NC}"
+echo -e "${PURPLE}│ ${NC}[7] 51820 (Standard WireGuard UDP)               ${PURPLE}│${NC}"
 echo -e "${PURPLE}└────────────────────────────────────────────────────┘${NC}"
-echo -en "${PURPLE}Select option [1-6] or enter custom port [Default 443]: ${NC}"
+echo -en "${PURPLE}Select option [1-7] or enter custom port [Default 443]: ${NC}"
 read -r input_VPN_PORT
 
 while true; do
@@ -65,6 +66,7 @@ while true; do
         4) PORT="1194" ;;
         5) PORT="500" ;;
         6) PORT="4500" ;;
+        7) PORT="51820" ;;
     "") PORT="443" ;;
         *)
             if [[ "$input_VPN_PORT" =~ ^[0-9]+$ ]]; then
@@ -124,7 +126,7 @@ rm -rf /etc/wireguard
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
 # P2: Removed apt-get update
-apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq
+apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq bc
 
 echo -e "${GREEN}Generating secure encryption keys...${NC}"
 mkdir -p /etc/wireguard
@@ -190,7 +192,31 @@ if ! systemctl restart wg-quick@wg0.service; then
 fi
 systemctl status --no-pager -l wg-quick@wg0.service
 
+echo -e "\n${GREEN}Installing Integrated Stealth & Streaming Enhancement (V2Ray)...${NC}"
+if [[ ! -f "./V2Ray-Installer.sh" ]]; then
+    echo -e "${GREEN}Fetching V2Ray-Installer.sh...${NC}"
+    GIT_REPO_RAW="https://raw.githubusercontent.com/cookiebaits/cbwireguard/main"
+    curl -sSfL "${GIT_REPO_RAW}/V2Ray-Installer.sh" -o "./V2Ray-Installer.sh" || true
+fi
+
+if [[ -f "./V2Ray-Installer.sh" ]]; then
+    chmod +x ./V2Ray-Installer.sh
+    # Automatically perform installation and configuration
+    # Using --install flag to avoid piping and allow interactive password prompt
+    ./V2Ray-Installer.sh --install
+else
+    echo -e "${RED}Warning: V2Ray-Installer.sh not found. Skipping integrated enhancements.${NC}"
+fi
+
 echo -e "\n${PURPLE}======================================================${NC}"
-echo -e "${GREEN}Server Setup Complete!${NC}"
+echo -e "${GREEN}Full Server Setup Complete!${NC}"
 echo -e "${PURPLE}Your WireGuard server is running on port: ${PORT}${NC}"
+echo -e "${PURPLE}Integrated V2Ray (TProxy + Streaming) is active.${NC}"
+echo -e "${PURPLE}------------------------------------------------------${NC}"
+echo -e "${PURPLE}EXTERNAL FIREWALL NOTICE:${NC}"
+echo -e "${PURPLE}Please ensure the following ports are allowed in your${NC}"
+echo -e "${PURPLE}hosting provider's console (e.g., AWS, GCP, Oracle):${NC}"
+echo -e "${GREEN}- $PORT/UDP (WireGuard Core)${NC}"
+echo -e "${GREEN}- 8888/UDP (V2Ray Stealth Entry)${NC}"
+echo -e "${GREEN}- 8880/TCP (V2Ray VMess Entry)${NC}"
 echo -e "${PURPLE}======================================================${NC}\n"

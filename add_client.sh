@@ -44,32 +44,8 @@ if [[ -z "$DEVICE_NAME" ]]; then
     exit 1
 fi
 
-# P2: Detection of optional stealth components
-HAS_CLOAK=false
-HAS_SS=false
-[[ -d "/etc/cloak" ]] && HAS_CLOAK=true
-[[ -d "/etc/shadowsocks-rust" ]] && HAS_SS=true
-
-STEALTH_MODE="n"
-if [[ "$HAS_CLOAK" == true || "$HAS_SS" == true ]]; then
-    echo -en "${GREEN}Enable Stealth Mode (WireGuard over Cloak/Shadowsocks) [y/n]? ${NC}"
-    read -r STEALTH_MODE
-else
-    echo -en "${GREEN}Stealth layer not detected. Install it now? [y/n]: ${NC}"
-    read -r install_stealth
-    if [[ "$install_stealth" =~ ^[Yy]$ ]]; then
-        if [[ -f "./Cloak2-Installer.sh" ]]; then
-            chmod +x ./Cloak2-Installer.sh
-            ./Cloak2-Installer.sh
-            [[ -d "/etc/cloak" ]] && HAS_CLOAK=true
-            [[ -d "/etc/shadowsocks-rust" ]] && HAS_SS=true
-            echo -en "${GREEN}Enable Stealth Mode for this client [y/n]? ${NC}"
-            read -r STEALTH_MODE
-        else
-            echo -e "${RED}Error: Cloak2-Installer.sh not found.${NC}"
-        fi
-    fi
-fi
+HAS_V2RAY=false
+[[ -f "/usr/local/bin/v2ray" ]] && HAS_V2RAY=true
 
 echo -en "${GREEN}Is QR-code suitable for output [y/n]? ${NC}"
 read -r IS_QRCODE
@@ -96,11 +72,19 @@ get_public_ip() {
     dig +short myip.opendns.com @resolver1.opendns.com 2>/dev/null || echo "UNKNOWN_IP"
 }
 IP_ADR=$(get_public_ip)
-PORT=$(grep -i "^ListenPort" /etc/wireguard/wg0.conf | awk '{print $3}')
+PORT=$(grep -i "^ListenPort" /etc/wireguard/wg0.conf | awk '{print $3}' || echo "51820")
 # P3: Respect MTU from server config if it exists
 SERVER_MTU=$(grep -i "^MTU" /etc/wireguard/wg0.conf | awk '{print $3}' || echo "$MTU")
 MTU=${SERVER_MTU:-$MTU}
-IP_PORT="$IP_ADR:$PORT"
+
+# Use V2Ray UDP Relay port (8888) if V2Ray is installed for extra stealth
+if [[ "$HAS_V2RAY" == true ]]; then
+    IP_PORT="$IP_ADR:8888"
+    # Lower MTU for nested UDP tunnels
+    MTU=1200
+else
+    IP_PORT="$IP_ADR:$PORT"
+fi
 
 SERVER_PRIVATE_IP_PREFIX="10.18.0"
 LAST_IP=$(grep -oP "AllowedIPs\s*=\s*10\.18\.0\.\K[0-9]+" /etc/wireguard/wg0.conf | sort -n | tail -n 1 || true)
@@ -115,52 +99,8 @@ CLIENT_IP="$SERVER_PRIVATE_IP_PREFIX.$NEXT_IP"
 
 CLIENT_CONF="/etc/wireguard/clients/$DEVICE_NAME.conf"
 
-if [[ "$STEALTH_MODE" =~ ^[Yy]$ ]]; then
-    # P2: Advanced Stealth - Conditional Instructions
-
-    # Defaults
-    cat <<EOF > "$CLIENT_CONF"
-[Interface]
-PrivateKey = $DEVICE_PRIVATE
-Address = $CLIENT_IP/32
-DNS = $DNS
-MTU = 1280
-
-[Peer]
-PublicKey = $SERVER_PUBLIC
-Endpoint = $IP_ADR:$PORT
-AllowedIPs = $ALLOWED_IPS
-EOF
-
-    echo -e "${PURPLE}======================================================${NC}"
-    echo -e "${GREEN}Stealth Mode Instructions:${NC}"
-    echo -e "${PURPLE}By default, this config points to the Server IP for standard use.${NC}"
-
-    if [[ "$HAS_CLOAK" == true && "$HAS_SS" == true ]]; then
-        ck_port=$(grep "^PORT=" /etc/cloak/ckport.txt | cut -d= -f2 || echo "443")
-        ck_uid=$(grep "^ckaauid=" /etc/cloak/ckport.txt | cut -d= -f2 | tr -d '"' || echo "UID")
-        ss_pass=$(jq -r '.password' /etc/shadowsocks-rust/config.json || echo "PASSWORD")
-
-        echo -e "To enable ${GREEN}Shadowsocks + Cloak${NC} obfuscation:"
-        echo -e "1. Change the ${GREEN}Endpoint${NC} in your WireGuard app to ${PURPLE}127.0.0.1:1080${NC}"
-        echo -e "2. Run Cloak client: ${PURPLE}ck-client -s $IP_ADR -p $ck_port -a $ck_uid -l 1984 -c ckclient.json &${NC}"
-        echo -e "3. Run Shadowsocks client: ${PURPLE}ss-local -s 127.0.0.1 -p 1984 -l 1080 -k $ss_pass -m aes-256-gcm &${NC}"
-    elif [[ "$HAS_SS" == true ]]; then
-        ss_port=$(jq -r '.server_port' /etc/shadowsocks-rust/config.json || echo "8388")
-        ss_pass=$(jq -r '.password' /etc/shadowsocks-rust/config.json || echo "PASSWORD")
-        echo -e "To enable ${GREEN}Shadowsocks Only${NC} obfuscation:"
-        echo -e "1. Change the ${GREEN}Endpoint${NC} in your WireGuard app to ${PURPLE}127.0.0.1:1080${NC}"
-        echo -e "2. Run Shadowsocks client: ${PURPLE}ss-local -s $IP_ADR -p $ss_port -l 1080 -k $ss_pass -m aes-256-gcm &${NC}"
-    elif [[ "$HAS_CLOAK" == true ]]; then
-        ck_port=$(grep "^PORT=" /etc/cloak/ckport.txt | cut -d= -f2 || echo "443")
-        ck_uid=$(grep "^ckaauid=" /etc/cloak/ckport.txt | cut -d= -f2 | tr -d '"' || echo "UID")
-        echo -e "To enable ${GREEN}Cloak Only${NC} obfuscation:"
-        echo -e "1. Change the ${GREEN}Endpoint${NC} in your WireGuard app to ${PURPLE}127.0.0.1:1080${NC}"
-        echo -e "2. Run Cloak client: ${PURPLE}ck-client -s $IP_ADR -p $ck_port -a $ck_uid -l 1080 -c ckclient.json &${NC}"
-    fi
-    echo -e "${PURPLE}======================================================${NC}"
-else
-    cat <<EOF > "$CLIENT_CONF"
+# Generate standard WireGuard config - No additional stealth setup needed for the client app
+cat <<EOF > "$CLIENT_CONF"
 [Interface]
 PrivateKey = $DEVICE_PRIVATE
 Address = $CLIENT_IP/32
@@ -172,7 +112,6 @@ PublicKey = $SERVER_PUBLIC
 Endpoint = $IP_PORT
 AllowedIPs = $ALLOWED_IPS
 EOF
-fi
 
 chmod 600 "$CLIENT_CONF"
 
@@ -200,7 +139,6 @@ get_master_pass() {
 encrypt_config() {
     get_master_pass
     openssl enc -aes-256-cbc -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "$CLIENT_CONF" -out "${CLIENT_CONF}.enc"
-    # Keep the plain text for the current display, then delete
 }
 
 if [[ "$IS_QRCODE" == "y" || -z "$IS_QRCODE" ]]; then
@@ -217,3 +155,9 @@ fi
 
 encrypt_config
 rm -f "$CLIENT_CONF"
+
+echo -e "\n${GREEN}Client Added Successfully!${NC}"
+if [[ "$HAS_V2RAY" == true ]]; then
+    echo -e "${PURPLE}Integrated Stealth (TProxy) and Streaming Enhancements are active.${NC}"
+    echo -e "${PURPLE}Just import the configuration file into your WireGuard client app.${NC}"
+fi
