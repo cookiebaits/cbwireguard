@@ -117,9 +117,15 @@ MTU = $MTU
 SaveConfig = false
 
 PostUp = ufw route allow in on wg0 out on $NETWORK_DEVICE
+PostUp = iptables -I FORWARD 1 -i wg0 -j ACCEPT
+PostUp = iptables -I FORWARD 1 -o wg0 -j ACCEPT
 PostUp = iptables -t nat -A POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
+PostUp = iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PreDown = ufw route delete allow in on wg0 out on $NETWORK_DEVICE
+PreDown = iptables -D FORWARD -i wg0 -j ACCEPT
+PreDown = iptables -D FORWARD -o wg0 -j ACCEPT
 PreDown = iptables -t nat -D POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
+PreDown = iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 EOF
 
 chmod 600 /etc/wireguard/wg0.conf
