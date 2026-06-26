@@ -46,30 +46,6 @@ if [[ -z "$DEVICE_NAME" ]]; then
     exit 1
 fi
 
-echo -en "${GREEN}Enable Stealth Mode (WireGuard over Xray) [y/n]? ${NC}"
-read -r STEALTH_MODE
-
-if [[ "$STEALTH_MODE" =~ ^[Yy]$ ]]; then
-    if [[ ! -d "/usr/local/etc/xray" ]]; then
-        echo -e "${PURPLE}Stealth layer (Xray) is not installed.${NC}"
-        echo -en "${GREEN}Would you like to install it now? [y/n]: ${NC}"
-        read -r install_cloak
-        if [[ "$install_cloak" =~ ^[Yy]$ ]]; then
-            # P2: Ensure Xray installation works
-            if [[ -f "./Xray-Installer.sh" ]]; then
-                chmod +x ./Xray-Installer.sh
-                ./Xray-Installer.sh
-            else
-                echo -e "${RED}Error: Xray-Installer.sh not found in current directory.${NC}"
-                exit 1
-            fi
-        else
-            echo -e "${RED}Stealth Mode requires Xray. Proceeding without Stealth Mode...${NC}"
-            STEALTH_MODE="n"
-        fi
-    fi
-fi
-
 echo -en "${GREEN}Is QR-code suitable for output [y/n]? ${NC}"
 read -r IS_QRCODE
 
@@ -100,33 +76,7 @@ CLIENT_IP="$SERVER_PRIVATE_IP_PREFIX.$NEXT_IP"
 
 CLIENT_CONF="/etc/wireguard/clients/$DEVICE_NAME.conf"
 
-if [[ "$STEALTH_MODE" =~ ^[Yy]$ ]]; then
-    # P2: Advanced Stealth - WireGuard over Xray VLESS
-    get_master_pass
-    xray_uuid=$(openssl enc -aes-256-cbc -d -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "/usr/local/etc/xray/client_uuid.enc" 2>/dev/null || echo "UUID_DECRYPTION_FAILED")
-    
-    cat <<EOF > "$CLIENT_CONF"
-[Interface]
-PrivateKey = $DEVICE_PRIVATE
-Address = $CLIENT_IP/32
-DNS = $DNS
-MTU = 1280
-
-[Peer]
-PublicKey = $SERVER_PUBLIC
-Endpoint = $IP_ADR:$PORT
-AllowedIPs = $ALLOWED_IPS
-EOF
-    echo -e "${PURPLE}======================================================${NC}"
-    echo -e "${GREEN}Stealth Mode Instructions (Xray VLESS):${NC}"
-    echo -e "${PURPLE}By default, this config points to the Server IP for standard use.${NC}"
-    echo -e "To enable ${GREEN}Xray VLESS${NC} obfuscation (to bypass detection):"
-    echo -e "1. Import this VLESS connection into your Xray client:"
-    echo -e "   ${PURPLE}vless://$xray_uuid@$IP_ADR:8880?encryption=none&security=none&type=ws&path=%2Fvideo#$DEVICE_NAME-stealth${NC}"
-    echo -e "2. Change the ${GREEN}Endpoint${NC} in your WireGuard app to point to your local Xray client's Socks/HTTP proxy or utilize TUN mode."
-    echo -e "${PURPLE}======================================================${NC}"
-else
-    cat <<EOF > "$CLIENT_CONF"
+cat <<EOF > "$CLIENT_CONF"
 [Interface]
 PrivateKey = $DEVICE_PRIVATE
 Address = $CLIENT_IP/32
@@ -138,7 +88,6 @@ PublicKey = $SERVER_PUBLIC
 Endpoint = $IP_PORT
 AllowedIPs = $ALLOWED_IPS
 EOF
-fi
 
 chmod 600 "$CLIENT_CONF"
 

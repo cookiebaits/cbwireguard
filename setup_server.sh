@@ -36,8 +36,8 @@ check_port_usage() {
     return 1 # Port is free
 }
 
-echo -e "${GREEN}Choose port for VPN (Recommended Stealthy Ports):${NC}"
-echo "[1] 443 (HTTPS/QUIC - Most Stealthy)"
+echo -e "${GREEN}Choose port for VPN:${NC}"
+echo "[1] 443"
 echo "[2] 53 (DNS)"
 echo "[3] 123 (NTP)"
 echo "[4] 1194 (OpenVPN UDP)"
