@@ -24,7 +24,7 @@ fi
 # Ideally, the user should provide this once per session.
 get_master_pass() {
     if [[ -z "${MASTER_PASS:-}" ]]; then
-        echo -en "${GREEN}Enter Master Password for Client Encryption/Decryption: ${NC}"
+        echo -en "${GREEN}Enter Decryption password: ${NC}"
         read -rs MASTER_PASS
         echo
         export MASTER_PASS

@@ -69,6 +69,10 @@ if [[ "$STEALTH_MODE" =~ ^[Yy]$ ]]; then
         fi
     fi
 fi
+if [[ "$STEALTH_MODE" =~ ^[Yy]$ ]]; then
+    get_master_pass
+fi
+
 
 echo -en "${GREEN}Is QR-code suitable for output [y/n]? ${NC}"
 read -r IS_QRCODE
@@ -102,7 +106,6 @@ CLIENT_CONF="/etc/wireguard/clients/$DEVICE_NAME.conf"
 
 if [[ "$STEALTH_MODE" =~ ^[Yy]$ ]]; then
     # P2: Advanced Stealth - WireGuard over Xray VLESS
-    get_master_pass
     xray_uuid=$(openssl enc -aes-256-cbc -d -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "/usr/local/etc/xray/client_uuid.enc" 2>/dev/null || echo "UUID_DECRYPTION_FAILED")
     
     cat <<EOF > "$CLIENT_CONF"
@@ -123,7 +126,8 @@ EOF
     echo -e "To enable ${GREEN}Xray VLESS${NC} obfuscation (to bypass detection):"
     echo -e "1. Import this VLESS connection into your Xray client:"
     echo -e "   ${PURPLE}vless://$xray_uuid@$IP_ADR:${XRAY_VLESS_PORT:-8880}?encryption=none&security=none&type=ws&path=%2Fvideo#$DEVICE_NAME-stealth${NC}"
-    echo -e "2. Change the ${GREEN}Endpoint${NC} in your WireGuard app to point to your local Xray client's Socks/HTTP proxy or utilize TUN mode."
+    echo -e "2. Configure your local Xray client with a ${GREEN}dokodemo-door${NC} inbound on port 10000 (UDP) routing to the server."
+    echo -e "3. Change the ${GREEN}Endpoint${NC} in your WireGuard app to ${PURPLE}127.0.0.1:10000${NC}"
     echo -e "${PURPLE}======================================================${NC}"
 else
     cat <<EOF > "$CLIENT_CONF"

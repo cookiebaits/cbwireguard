@@ -139,6 +139,17 @@ fi
 SERVER_PRIVATE_IP="10.18.0.1"
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
+# Scan for existing WireGuard services
+if systemctl list-units --type=service | grep -q "wg-quick@"; then
+    echo -e "${PURPLE}Existing WireGuard service detected. Bringing it down for clean installation...${NC}"
+    for service in $(systemctl list-units --type=service | grep "wg-quick@" | awk '{print $1}'); do
+        systemctl stop "$service" || true
+        systemctl disable "$service" || true
+    done
+    # We do not fully uninstall packages here as we are immediately reinstalling/reconfiguring,
+    # but we ensure the service is completely stopped.
+fi
+
 apt-get update -y
 apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq
 

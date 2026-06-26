@@ -118,6 +118,12 @@ settings_menu() {
                 ;;
             b) break ;;
         esac
+
+        if [[ "$OPTION" != "q" ]]; then
+            echo -en "
+${GREEN}Press Enter to return to the main menu...${NC}"
+            read -r
+        fi
     done
 }
 
