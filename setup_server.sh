@@ -204,8 +204,12 @@ systemctl status --no-pager -l wg-quick@wg0.service
 
 echo -e "${GREEN}Deploying Xray Stealth Protocol...${NC}"
 if [[ ! -f "./Xray-Installer.sh" ]]; then
-    echo -e "${RED}Error: Xray-Installer.sh not found.${NC}"
-    exit 1
+    echo -e "${PURPLE}Fetching Xray-Installer.sh from repository...${NC}"
+    curl -sSfL "${GIT_REPO:-https://raw.githubusercontent.com/cookiebaits/cbwireguard/main}/Xray-Installer.sh" -o ./Xray-Installer.sh || true
+    if [[ ! -f "./Xray-Installer.sh" ]]; then
+        echo -e "${RED}Failed to fetch Xray-Installer.sh. Please place it in the directory manually.${NC}"
+        return 1 2>/dev/null || true
+    fi
     chmod +x ./Xray-Installer.sh
 fi
 ./Xray-Installer.sh --install
