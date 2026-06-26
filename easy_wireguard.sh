@@ -39,13 +39,6 @@ if [[ "$EUID" -ne 0 ]]; then
     exit 1
 fi
 
-init_environment() {
-    if [[ ! -d "$INSTALL_DIR" ]]; then
-        mkdir -p "$INSTALL_DIR"
-    fi
-    chmod 700 "$INSTALL_DIR" 
-}
-
 fetch_and_run() {
     local script_name="$1"
     local script_path="./${script_name}"

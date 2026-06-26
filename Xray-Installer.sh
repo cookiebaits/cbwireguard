@@ -9,6 +9,12 @@ NC='\033[0m'
 XRAY_CONFIG="/usr/local/etc/xray/config.json"
 XRAY_UUID_FILE="/usr/local/etc/xray/client_uuid.enc"
 
+SETTINGS_FILE="/root/easy_wireguard/settings.conf"
+if [[ -f "$SETTINGS_FILE" ]]; then
+    # shellcheck source=/dev/null
+    source "$SETTINGS_FILE"
+fi
+
 if [[ "$EUID" -ne 0 ]]; then
     echo -e "${RED}Security Error: Please run this script as root (sudo).${NC}"
     exit 1
@@ -58,7 +64,7 @@ generate_config() {
       "tag": "stealth-udp-in"
     },
     {
-      "port": 8880,
+      "port": ${XRAY_VLESS_PORT:-8880},
       "listen": "0.0.0.0",
       "protocol": "vless",
       "tag": "vless-in",
@@ -115,8 +121,7 @@ generate_config() {
           "mark": 255
         }
       }
-    },
-
+    }
   ],
   "routing": {
     "domainStrategy": "IPIfNonMatch",
@@ -142,7 +147,7 @@ generate_config() {
   }
 }
 EOF
-    chmod 644 "$XRAY_CONFIG"
+    chmod 600 "$XRAY_CONFIG"
 
     get_master_pass
     echo "$uuid" | openssl enc -aes-256-cbc -salt -pbkdf2 -pass "pass:$MASTER_PASS" -out "$XRAY_UUID_FILE"
@@ -281,7 +286,7 @@ setup_firewall() {
     if command -v ufw >/dev/null; then
         echo -e "${GREEN}Configuring UFW for Xray...${NC}"
         ufw allow 8888/udp
-        ufw allow 8880/tcp
+        ufw allow "${XRAY_VLESS_PORT:-8880}/tcp"
         ufw allow 12345
     fi
 }
@@ -309,10 +314,10 @@ test_integration() {
         errors=$((errors + 1))
     fi
 
-    if ss -Hlntu | grep -q ":8880"; then
-        echo -e "[PASS] Xray VLESS Port (8880) is listening."
+    if ss -Hlntu | grep -q ":${XRAY_VLESS_PORT:-8880}"; then
+        echo -e "[PASS] Xray VLESS Port (${XRAY_VLESS_PORT:-8880}) is listening."
     else
-        echo -e "${RED}[FAIL] Xray VLESS Port (8880) is NOT listening.${NC}"
+        echo -e "${RED}[FAIL] Xray VLESS Port (${XRAY_VLESS_PORT:-8880}) is NOT listening.${NC}"
         errors=$((errors + 1))
     fi
 
@@ -427,7 +432,7 @@ uninstall_xray() {
 
     if command -v ufw >/dev/null; then
         ufw delete allow 8888/udp || true
-        ufw delete allow 8880/tcp || true
+        ufw delete allow "${XRAY_VLESS_PORT:-8880}/tcp" || true
         ufw delete allow 12345 || true
     fi
 }
@@ -439,7 +444,7 @@ show_status() {
         local uuid
         uuid=$(openssl enc -aes-256-cbc -d -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "$XRAY_UUID_FILE" 2>/dev/null || echo "Decryption Failed")
         echo -e "${PURPLE}Connection Info (Stealth VLESS):${NC}"
-        echo -e "Port: 8880, UUID: $uuid, Protocol: VLESS, Transport: ws, Path: /video"
+        echo -e "Port: ${XRAY_VLESS_PORT:-8880}, UUID: $uuid, Protocol: VLESS, Transport: ws, Path: /video"
         echo -e "${PURPLE}WireGuard Integration:${NC}"
         echo -e "Stealth UDP Entry: 8888, TProxy Port: 12345"
     else

@@ -122,7 +122,7 @@ EOF
     echo -e "${PURPLE}By default, this config points to the Server IP for standard use.${NC}"
     echo -e "To enable ${GREEN}Xray VLESS${NC} obfuscation (to bypass detection):"
     echo -e "1. Import this VLESS connection into your Xray client:"
-    echo -e "   ${PURPLE}vless://$xray_uuid@$IP_ADR:8880?encryption=none&security=none&type=ws&path=%2Fvideo#$DEVICE_NAME-stealth${NC}"
+    echo -e "   ${PURPLE}vless://$xray_uuid@$IP_ADR:${XRAY_VLESS_PORT:-8880}?encryption=none&security=none&type=ws&path=%2Fvideo#$DEVICE_NAME-stealth${NC}"
     echo -e "2. Change the ${GREEN}Endpoint${NC} in your WireGuard app to point to your local Xray client's Socks/HTTP proxy or utilize TUN mode."
     echo -e "${PURPLE}======================================================${NC}"
 else

@@ -82,6 +82,54 @@ else
     SSH_PORT="$input_SSH_PORT"
 fi
 
+
+echo -e "${GREEN}Choose port for Xray VLESS (Recommended Cloudflare/CDN Ports):${NC}"
+echo "[1] 8880 (HTTP/CDN - Default)"
+echo "[2] 443 (HTTPS - Best for TLS)"
+echo "[3] 8443 (Alt-HTTPS)"
+echo "[4] 2053 (Alt-HTTPS)"
+echo "[5] 2083 (Alt-HTTPS)"
+echo "[6] 2087 (Alt-HTTPS)"
+echo -en "${PURPLE}Select option [1-6] or enter custom port [Default 8880]: ${NC}"
+read -r input_VLESS_PORT
+
+while true; do
+    case "$input_VLESS_PORT" in
+        1) XRAY_VLESS_PORT="8880" ;;
+        2) XRAY_VLESS_PORT="443" ;;
+        3) XRAY_VLESS_PORT="8443" ;;
+        4) XRAY_VLESS_PORT="2053" ;;
+        5) XRAY_VLESS_PORT="2083" ;;
+        6) XRAY_VLESS_PORT="2087" ;;
+        "") XRAY_VLESS_PORT="8880" ;;
+        *)
+            if [[ "$input_VLESS_PORT" =~ ^[0-9]+$ ]]; then
+                XRAY_VLESS_PORT="$input_VLESS_PORT"
+            else
+                XRAY_VLESS_PORT="8880"
+                echo -e "${RED}Invalid input. Defaulting to 8880.${NC}"
+            fi
+            ;;
+    esac
+
+    if check_port_usage "$XRAY_VLESS_PORT"; then
+        echo -e "${RED}Error: Port ${XRAY_VLESS_PORT} is already in use by another process!${NC}"
+        echo -en "${GREEN}Please enter another port or select from the menu above: ${NC}"
+        read -r input_VLESS_PORT
+    elif [[ "$XRAY_VLESS_PORT" == "$PORT" ]]; then
+        echo -e "${RED}Error: Port ${XRAY_VLESS_PORT} is already selected for WireGuard!${NC}"
+        echo -en "${GREEN}Please enter a different port for VLESS: ${NC}"
+        read -r input_VLESS_PORT
+    else
+        break
+    fi
+done
+
+export XRAY_VLESS_PORT
+
+mkdir -p /root/easy_wireguard
+echo "XRAY_VLESS_PORT=${XRAY_VLESS_PORT}" >> /root/easy_wireguard/settings.conf
+
 echo -en "${GREEN}Enter MTU, leave blank for default [${MTU}]: ${NC}"
 read -r input_MTU
 if [[ -n "$input_MTU" ]]; then
@@ -153,6 +201,14 @@ if ! systemctl restart wg-quick@wg0.service; then
     exit 1
 fi
 systemctl status --no-pager -l wg-quick@wg0.service
+
+echo -e "${GREEN}Deploying Xray Stealth Protocol...${NC}"
+if [[ ! -f "./Xray-Installer.sh" ]]; then
+    echo -e "${RED}Error: Xray-Installer.sh not found.${NC}"
+    exit 1
+    chmod +x ./Xray-Installer.sh
+fi
+./Xray-Installer.sh --install
 
 echo -e "\n${PURPLE}======================================================${NC}"
 echo -e "${GREEN}Server Setup Complete!${NC}"
