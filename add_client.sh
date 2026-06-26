@@ -129,6 +129,43 @@ EOF
     echo -e "2. Configure your local Xray client with a ${GREEN}dokodemo-door${NC} inbound on port 10000 (UDP) routing to the server."
     echo -e "3. Change the ${GREEN}Endpoint${NC} in your WireGuard app to ${PURPLE}127.0.0.1:10000${NC}"
     echo -e "${PURPLE}======================================================${NC}"
+elif [[ -n "${WSTUNNEL_PORT:-}" ]]; then
+    echo -en "${GREEN}Enable WireGuard over TLS (wstunnel) [y/N]? ${NC}"
+    read -r WSTUNNEL_MODE
+    if [[ "$WSTUNNEL_MODE" =~ ^[Yy]$ ]]; then
+        cat <<EOF > "$CLIENT_CONF"
+[Interface]
+PrivateKey = $DEVICE_PRIVATE
+Address = $CLIENT_IP/32
+DNS = $DNS
+MTU = 1280
+
+[Peer]
+PublicKey = $SERVER_PUBLIC
+Endpoint = 127.0.0.1:10001
+AllowedIPs = $ALLOWED_IPS
+EOF
+        echo -e "${PURPLE}======================================================${NC}"
+        echo -e "${GREEN}Stealth Mode Instructions (wstunnel - WireGuard over TLS):${NC}"
+        echo -e "1. Download wstunnel from: https://github.com/erebe/wstunnel/releases"
+        echo -e "2. Run this command on your local machine to establish the tunnel:"
+        echo -e "   ${PURPLE}wstunnel client -L udp://127.0.0.1:10001:127.0.0.1:${PORT} wss://${IP_ADR}:${WSTUNNEL_PORT}${NC}"
+        echo -e "3. The generated WireGuard config already has the Endpoint set to ${PURPLE}127.0.0.1:10001${NC}."
+        echo -e "${PURPLE}======================================================${NC}"
+    else
+        cat <<EOF > "$CLIENT_CONF"
+[Interface]
+PrivateKey = $DEVICE_PRIVATE
+Address = $CLIENT_IP/32
+DNS = $DNS
+MTU = $MTU
+
+[Peer]
+PublicKey = $SERVER_PUBLIC
+Endpoint = $IP_PORT
+AllowedIPs = $ALLOWED_IPS
+EOF
+    fi
 else
     cat <<EOF > "$CLIENT_CONF"
 [Interface]

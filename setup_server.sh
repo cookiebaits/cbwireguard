@@ -225,6 +225,61 @@ if [[ ! -f "./Xray-Installer.sh" ]]; then
 fi
 ./Xray-Installer.sh --install
 
+echo -en "${GREEN}Install wstunnel (WireGuard over TLS) for stealth? [y/N]: ${NC}"
+read -r install_wstunnel
+if [[ "$install_wstunnel" =~ ^[Yy]$ ]]; then
+    echo -en "${GREEN}Choose a port for wstunnel [Default 4433]: ${NC}"
+    read -r WSTUNNEL_PORT
+    WSTUNNEL_PORT=${WSTUNNEL_PORT:-4433}
+
+    echo "WSTUNNEL_PORT=${WSTUNNEL_PORT}" >> /root/easy_wireguard/settings.conf
+
+    echo -e "${GREEN}Downloading and installing wstunnel...${NC}"
+    curl -sSL "https://github.com/erebe/wstunnel/releases/download/v10.5.5/wstunnel_10.5.5_linux_amd64.tar.gz" | tar -xz -C /usr/local/bin wstunnel
+    chmod +x /usr/local/bin/wstunnel
+
+    cat <<EOF > /etc/systemd/system/wstunnel.service
+[Unit]
+Description=wstunnel server
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/wstunnel server wss://0.0.0.0:${WSTUNNEL_PORT} --restrict-to 127.0.0.1:${PORT}
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable wstunnel
+    systemctl restart wstunnel
+
+    ufw allow "$WSTUNNEL_PORT/tcp"
+fi
+
+echo -en "${GREEN}Enable default Split Tunneling for streaming services (Netflix, Hulu, Disney+, etc.)? [y/N]: ${NC}"
+read -r split_tunnel_choice
+if [[ "$split_tunnel_choice" =~ ^[Yy]$ ]]; then
+    echo -e "${GREEN}Configuring default bypass domains...${NC}"
+    cat <<EOF > /etc/wireguard/bypass_domains.txt
+netflix.com
+hulu.com
+disneyplus.com
+hbomax.com
+max.com
+EOF
+    chmod 600 /etc/wireguard/bypass_domains.txt
+    if [[ -f "./domain_bypass.sh" ]]; then
+        echo -e "${GREEN}Applying routes...${NC}"
+        ./domain_bypass.sh << 'EOF_INPUT' || true
+4
+0
+EOF_INPUT
+    fi
+fi
+
 echo -e "\n${PURPLE}======================================================${NC}"
 echo -e "${GREEN}Server Setup Complete!${NC}"
 echo -e "${PURPLE}Your WireGuard server is running on port: ${PORT}${NC}"
