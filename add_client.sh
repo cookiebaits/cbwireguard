@@ -87,6 +87,7 @@ MTU = $MTU
 PublicKey = $SERVER_PUBLIC
 Endpoint = $IP_PORT
 AllowedIPs = $ALLOWED_IPS
+PersistentKeepalive = 25
 EOF
 
 chmod 600 "$CLIENT_CONF"

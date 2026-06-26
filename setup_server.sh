@@ -116,16 +116,18 @@ ListenPort = $PORT
 MTU = $MTU
 SaveConfig = false
 
-PostUp = ufw route allow in on wg0 out on $NETWORK_DEVICE
 PostUp = iptables -I FORWARD 1 -i wg0 -j ACCEPT
 PostUp = iptables -I FORWARD 1 -o wg0 -j ACCEPT
 PostUp = iptables -t nat -A POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
 PostUp = iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-PreDown = ufw route delete allow in on wg0 out on $NETWORK_DEVICE
+PostUp = ufw route allow in on wg0 out on $NETWORK_DEVICE
+PostUp = ufw allow in on wg0
 PreDown = iptables -D FORWARD -i wg0 -j ACCEPT
 PreDown = iptables -D FORWARD -o wg0 -j ACCEPT
 PreDown = iptables -t nat -D POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
 PreDown = iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+PreDown = ufw route delete allow in on wg0 out on $NETWORK_DEVICE
+PreDown = ufw delete allow in on wg0
 EOF
 
 chmod 600 /etc/wireguard/wg0.conf
@@ -134,16 +136,20 @@ echo -e "${GREEN}Optimizing Network Throughput (BBR & Forwarding)...${NC}"
 sed -i '/net.ipv4.ip_forward/d' /etc/sysctl.conf
 sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
+sed -i '/net.ipv4.conf.all.rp_filter/d' /etc/sysctl.conf
+sed -i '/net.ipv4.conf.default.rp_filter/d' /etc/sysctl.conf
 
 echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
 echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
 echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
-# P2: Harden network stack
-echo "net.ipv4.conf.all.rp_filter=1" >> /etc/sysctl.conf
-echo "net.ipv4.conf.default.rp_filter=1" >> /etc/sysctl.conf
+# P2: Harden network stack (using loose mode to prevent routing drops)
+echo "net.ipv4.conf.all.rp_filter=2" >> /etc/sysctl.conf
+echo "net.ipv4.conf.default.rp_filter=2" >> /etc/sysctl.conf
 sysctl -p
 
 echo -e "${GREEN}Configuring UFW Firewall...${NC}"
+sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw || true
+sed -i 's/#net\/ipv4\/ip_forward=1/net\/ipv4\/ip_forward=1/' /etc/ufw/sysctl.conf || true
 ufw allow "$PORT/udp"
 ufw allow "$SSH_PORT/tcp"
 ufw --force enable
