@@ -9,25 +9,7 @@ NC='\033[0m'
 
 GIT_REPO='https://raw.githubusercontent.com/cookiebaits/cbwireguard/main'
 INSTALL_DIR="/root/easy_wireguard" 
-SETTINGS_FILE="${INSTALL_DIR}/settings.conf"
-
-init_environment() {
-    if [[ ! -d "$INSTALL_DIR" ]]; then
-        mkdir -p "$INSTALL_DIR"
-    fi
-    chmod 700 "$INSTALL_DIR"
-
-    if [[ ! -f "$SETTINGS_FILE" ]]; then
-        cat <<EOF > "$SETTINGS_FILE"
-DEFAULT_MTU=1280
-DEFAULT_DNS="94.140.14.49, 9.9.9.9, 94.140.14.59"
-DEFAULT_ALLOWED_IPS="0.0.0.0/1, 128.0.0.0/1"
-EOF
-        chmod 600 "$SETTINGS_FILE"
-    fi
-}
-
-init_environment
+SETTINGS_FILE="settings.conf"
 
 if [[ -f "$SETTINGS_FILE" ]]; then
     # shellcheck source=/dev/null
@@ -38,6 +20,13 @@ if [[ "$EUID" -ne 0 ]]; then
     echo -e "${RED}Security Error: Please run this script as root (sudo).${NC}"
     exit 1
 fi
+
+init_environment() {
+    if [[ ! -d "$INSTALL_DIR" ]]; then
+        mkdir -p "$INSTALL_DIR"
+    fi
+    chmod 700 "$INSTALL_DIR" 
+}
 
 fetch_and_run() {
     local script_name="$1"
@@ -76,10 +65,9 @@ display_menu() {
 [1] Setup WireGuard server
 [2] Add new client (peer)
 [3] Show client (peer) QR
-[4] Configure clients (Check/Edit/Remove)
+[4] List configured clients
 [5] Backup & Restore Manager
-[6] Domain-Based Split Tunneling
-[7] Install/Manage Xray (Stealth Plugin)
+[6] Install/Manage Cloak (Stealth Plugin)
 [s] Settings (MTU, DNS, AllowedIPs)
 ${RED}[r] Remove WireGuard server from this system${GREEN}
 [q] Exit
@@ -118,42 +106,23 @@ settings_menu() {
                 ;;
             b) break ;;
         esac
-
-        if [[ "$OPTION" != "q" ]]; then
-            echo -en "
-${GREEN}Press Enter to return to the main menu...${NC}"
-            read -r
-        fi
     done
 }
 
 main() {
+    init_environment
     # Loop the main menu so it returns after completing a task
     while true; do
-        clear
-        echo -e "${PURPLE}======================================================${NC}"
-        echo -e "${GREEN}       🍪 Cookie's Easy WireGuard Manager${NC}"
-        echo -e "${PURPLE}======================================================${NC}"
         display_menu
         read -r OPTION
 
         case "$OPTION" in
             1) fetch_and_run "setup_server.sh" ;;
             2) fetch_and_run "add_client.sh" ;;
-            3)
-                echo -en "${GREEN}Enter device name to show QR: ${NC}"
-                read -r dname
-                # We can reuse user_manager.sh logic or just call a small snippet
-                # For now, let's keep it simple and maybe restore show_qr.sh if needed
-                # or just use user_manager.sh with a flag.
-                # Actually, user_manager.sh has show_user.
-                # Let's just point to a new script that does exactly this or use a flag.
-                MASTER_PASS="" fetch_and_run "user_manager.sh" --show "$dname" || true
-                ;;
-            4) fetch_and_run "user_manager.sh" ;;
+            3) fetch_and_run "show_qr.sh" ;;
+            4) fetch_and_run "list_clients.sh" ;;
             5) fetch_and_run "backup_manager.sh" ;;
-            6) fetch_and_run "domain_bypass.sh" ;;
-            7) fetch_and_run "Xray-Installer.sh" ;;
+            6) fetch_and_run "Cloak2-Installer.sh" ;;
             s) settings_menu ;;
             r)
                 fetch_and_run "remove_server.sh"

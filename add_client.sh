@@ -6,7 +6,7 @@ PURPLE='\033[0;35m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-SETTINGS_FILE="/root/easy_wireguard/settings.conf"
+SETTINGS_FILE="settings.conf"
 if [[ -f "$SETTINGS_FILE" ]]; then
     # shellcheck source=/dev/null
     source "$SETTINGS_FILE"
@@ -22,16 +22,6 @@ if [[ "$EUID" -ne 0 ]]; then
     exit 1
 fi
 
-
-get_master_pass() {
-    if [[ -z "${MASTER_PASS:-}" ]]; then
-        echo -en "${GREEN}Enter Master Password for Client Encryption/Decryption: ${NC}"
-        read -rs MASTER_PASS
-        echo
-        export MASTER_PASS
-    fi
-}
-
 if [[ ! -f "/etc/wireguard/wg0.conf" ]]; then
     echo -e "${RED}Error: Server configuration not found. Please run setup_server.sh first.${NC}"
     exit 1
@@ -45,34 +35,6 @@ if [[ -z "$DEVICE_NAME" ]]; then
     echo -e "${RED}Invalid device name.${NC}"
     exit 1
 fi
-
-echo -en "${GREEN}Enable Stealth Mode (WireGuard over Xray) [y/n]? ${NC}"
-read -r STEALTH_MODE
-
-if [[ "$STEALTH_MODE" =~ ^[Yy]$ ]]; then
-    if [[ ! -d "/usr/local/etc/xray" ]]; then
-        echo -e "${PURPLE}Stealth layer (Xray) is not installed.${NC}"
-        echo -en "${GREEN}Would you like to install it now? [y/n]: ${NC}"
-        read -r install_cloak
-        if [[ "$install_cloak" =~ ^[Yy]$ ]]; then
-            # P2: Ensure Xray installation works
-            if [[ -f "./Xray-Installer.sh" ]]; then
-                chmod +x ./Xray-Installer.sh
-                ./Xray-Installer.sh
-            else
-                echo -e "${RED}Error: Xray-Installer.sh not found in current directory.${NC}"
-                exit 1
-            fi
-        else
-            echo -e "${RED}Stealth Mode requires Xray. Proceeding without Stealth Mode...${NC}"
-            STEALTH_MODE="n"
-        fi
-    fi
-fi
-if [[ "$STEALTH_MODE" =~ ^[Yy]$ ]]; then
-    get_master_pass
-fi
-
 
 echo -en "${GREEN}Is QR-code suitable for output [y/n]? ${NC}"
 read -r IS_QRCODE
@@ -104,33 +66,7 @@ CLIENT_IP="$SERVER_PRIVATE_IP_PREFIX.$NEXT_IP"
 
 CLIENT_CONF="/etc/wireguard/clients/$DEVICE_NAME.conf"
 
-if [[ "$STEALTH_MODE" =~ ^[Yy]$ ]]; then
-    # P2: Advanced Stealth - WireGuard over Xray VLESS
-    xray_uuid=$(openssl enc -aes-256-cbc -d -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "/usr/local/etc/xray/client_uuid.enc" 2>/dev/null || echo "UUID_DECRYPTION_FAILED")
-    
-    cat <<EOF > "$CLIENT_CONF"
-[Interface]
-PrivateKey = $DEVICE_PRIVATE
-Address = $CLIENT_IP/32
-DNS = $DNS
-MTU = 1280
-
-[Peer]
-PublicKey = $SERVER_PUBLIC
-Endpoint = $IP_ADR:$PORT
-AllowedIPs = $ALLOWED_IPS
-EOF
-    echo -e "${PURPLE}======================================================${NC}"
-    echo -e "${GREEN}Stealth Mode Instructions (Xray VLESS):${NC}"
-    echo -e "${PURPLE}By default, this config points to the Server IP for standard use.${NC}"
-    echo -e "To enable ${GREEN}Xray VLESS${NC} obfuscation (to bypass detection):"
-    echo -e "1. Import this VLESS connection into your Xray client:"
-    echo -e "   ${PURPLE}vless://$xray_uuid@$IP_ADR:${XRAY_VLESS_PORT:-8880}?encryption=none&security=none&type=ws&path=%2Fvideo#$DEVICE_NAME-stealth${NC}"
-    echo -e "2. Configure your local Xray client with a ${GREEN}dokodemo-door${NC} inbound on port 10000 (UDP) routing to the server."
-    echo -e "3. Change the ${GREEN}Endpoint${NC} in your WireGuard app to ${PURPLE}127.0.0.1:10000${NC}"
-    echo -e "${PURPLE}======================================================${NC}"
-else
-    cat <<EOF > "$CLIENT_CONF"
+cat <<EOF > "$CLIENT_CONF"
 [Interface]
 PrivateKey = $DEVICE_PRIVATE
 Address = $CLIENT_IP/32
@@ -142,27 +78,18 @@ PublicKey = $SERVER_PUBLIC
 Endpoint = $IP_PORT
 AllowedIPs = $ALLOWED_IPS
 EOF
-fi
 
 chmod 600 "$CLIENT_CONF"
 
 cat <<EOF >> /etc/wireguard/wg0.conf
 
 [Peer]
-# USER_START: $DEVICE_NAME
+# $DEVICE_NAME
 PublicKey = $DEVICE_PUBLIC
 AllowedIPs = $CLIENT_IP/32
-# USER_END: $DEVICE_NAME
 EOF
 
 wg set wg0 peer "$DEVICE_PUBLIC" allowed-ips "$CLIENT_IP/32"
-
-# P3: Encryption of client config
-encrypt_config() {
-    get_master_pass
-    openssl enc -aes-256-cbc -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "$CLIENT_CONF" -out "${CLIENT_CONF}.enc"
-    # Keep the plain text for the current display, then delete
-}
 
 if [[ "$IS_QRCODE" == "y" || -z "$IS_QRCODE" ]]; then
     if ! command -v qrencode &> /dev/null; then
@@ -175,6 +102,3 @@ else
     cat "$CLIENT_CONF"
     echo -e "${NC}"
 fi
-
-encrypt_config
-rm -f "$CLIENT_CONF"
