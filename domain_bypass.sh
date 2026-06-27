@@ -37,7 +37,13 @@ update_routes() {
     while IFS= read -r domain; do
         [[ -z "$domain" || "$domain" =~ ^# ]] && continue
         echo -e "Resolving ${PURPLE}${domain}${NC}..."
-        ips=$(dig +short "$domain" | grep -E '^[0-9.]+$' || true)
+        ips=$(dig +short "$domain" 2>/dev/null | grep -E '^[0-9.]+$' || true)
+
+        if [[ -z "$ips" ]]; then
+            echo -e "${RED}Warning: Could not resolve ${domain}, skipping.${NC}"
+            continue
+        fi
+
         for ip in $ips; do
             echo -e "Adding route for ${PURPLE}${ip}${NC} via ${gateway}..."
             ip route add "$ip" via "$gateway" 2>/dev/null || true

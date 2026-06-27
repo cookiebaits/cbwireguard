@@ -165,6 +165,12 @@ sed -i '/net.ipv4.conf.default.rp_filter/d' /etc/sysctl.conf
 echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
 echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
 echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+# Advanced TCP Buffer and MTU Optimizations for Max Throughput
+echo "net.core.rmem_max=2500000" >> /etc/sysctl.conf
+echo "net.core.wmem_max=2500000" >> /etc/sysctl.conf
+echo "net.ipv4.tcp_rmem=4096 87380 2500000" >> /etc/sysctl.conf
+echo "net.ipv4.tcp_wmem=4096 16384 2500000" >> /etc/sysctl.conf
+echo "net.ipv4.tcp_mtu_probing=1" >> /etc/sysctl.conf
 # P2: Harden network stack (using loose mode to prevent routing drops)
 echo "net.ipv4.conf.all.rp_filter=2" >> /etc/sysctl.conf
 echo "net.ipv4.conf.default.rp_filter=2" >> /etc/sysctl.conf
