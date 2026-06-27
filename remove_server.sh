@@ -41,6 +41,7 @@ if [[ "$FLAG" =~ ^[Yy]$ ]]; then
     echo -e "${GREEN}Uninstalling WireGuard...${NC}"
     # Purge destroys the app configurations; autoremove cleans up unused dependencies
     apt-get purge -y wireguard wireguard-tools
+    apt-get autoremove -y
 
     # 4. Destroy the sensitive keys and configuration directory
     echo -e "${GREEN}Deleting WireGuard keys and config directories...${NC}"
