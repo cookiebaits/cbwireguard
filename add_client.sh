@@ -32,6 +32,33 @@ get_master_pass() {
     fi
 }
 
+# Function to calculate AllowedIPs covering 0.0.0.0/0 except for a specific IP
+exclude_ip_from_0_0_0_0() {
+    local exclude_ip=$1
+    local a b c d
+    IFS=. read -r a b c d <<< "$exclude_ip"
+    local exclude_int=$(( (a << 24) + (b << 16) + (c << 8) + d ))
+    local allowed_ips=""
+    local current_ip=0
+    local i bit alt_bit subnet mask subnet_ip
+
+    for (( i=0; i<32; i++ )); do
+        bit=$(( (exclude_int >> (31 - i)) & 1 ))
+        alt_bit=$(( 1 - bit ))
+        subnet=$(( current_ip | (alt_bit << (31 - i)) ))
+        mask=$(( i + 1 ))
+
+        subnet_ip="$(( (subnet >> 24) & 255 )).$(( (subnet >> 16) & 255 )).$(( (subnet >> 8) & 255 )).$(( subnet & 255 ))"
+        if [ -z "$allowed_ips" ]; then
+            allowed_ips="$subnet_ip/$mask"
+        else
+            allowed_ips="$allowed_ips, $subnet_ip/$mask"
+        fi
+        current_ip=$(( current_ip | (bit << (31 - i)) ))
+    done
+    echo "$allowed_ips"
+}
+
 if [[ ! -f "/etc/wireguard/wg0.conf" ]]; then
     echo -e "${RED}Error: Server configuration not found. Please run setup_server.sh first.${NC}"
     exit 1
@@ -133,6 +160,9 @@ elif [[ -n "${WSTUNNEL_PORT:-}" ]]; then
     echo -en "${GREEN}Enable WireGuard over TLS (wstunnel) [y/N]? ${NC}"
     read -r WSTUNNEL_MODE
     if [[ "$WSTUNNEL_MODE" =~ ^[Yy]$ ]]; then
+        # Calculate safe AllowedIPs preventing routing loop for wstunnel traffic
+        WSTUNNEL_ALLOWED_IPS=$(exclude_ip_from_0_0_0_0 "$IP_ADR")
+
         cat <<EOF > "$CLIENT_CONF"
 [Interface]
 PrivateKey = $DEVICE_PRIVATE
@@ -143,14 +173,15 @@ MTU = 1280
 [Peer]
 PublicKey = $SERVER_PUBLIC
 Endpoint = 127.0.0.1:10001
-AllowedIPs = $ALLOWED_IPS
+AllowedIPs = $WSTUNNEL_ALLOWED_IPS
 EOF
         echo -e "${PURPLE}======================================================${NC}"
         echo -e "${GREEN}Stealth Mode Instructions (wstunnel - WireGuard over TLS):${NC}"
         echo -e "1. Download wstunnel from: https://github.com/erebe/wstunnel/releases"
-        echo -e "2. Run this command on your local machine to establish the tunnel:"
-        echo -e "   ${PURPLE}wstunnel client -L udp://127.0.0.1:10001:127.0.0.1:${PORT} wss://${IP_ADR}:${WSTUNNEL_PORT}${NC}"
+        echo -e "2. Run this command on your local machine to establish the tunnel (Note: the timeout=0 prevents tunnel dropping):"
+        echo -e "   ${PURPLE}wstunnel client -L 'udp://127.0.0.1:10001:127.0.0.1:${PORT}?timeout_sec=0' wss://${IP_ADR}:${WSTUNNEL_PORT}${NC}"
         echo -e "3. The generated WireGuard config already has the Endpoint set to ${PURPLE}127.0.0.1:10001${NC}."
+        echo -e "   ${GREEN}(Note: AllowedIPs has been safely calculated to avoid routing loops.)${NC}"
         echo -e "${PURPLE}======================================================${NC}"
     else
         cat <<EOF > "$CLIENT_CONF"

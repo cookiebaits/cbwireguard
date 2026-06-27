@@ -244,7 +244,7 @@ Description=wstunnel server
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/wstunnel server wss://0.0.0.0:${WSTUNNEL_PORT} --restrict-to 127.0.0.1:${PORT}
+ExecStart=/usr/local/bin/wstunnel server wss://[::]:${WSTUNNEL_PORT} --restrict-to 127.0.0.1:${PORT}
 Restart=always
 User=root
 
