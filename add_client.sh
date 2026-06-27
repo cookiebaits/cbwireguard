@@ -106,7 +106,7 @@ wg set wg0 peer "$DEVICE_PUBLIC" allowed-ips "$CLIENT_IP/32"
 # P3: Encryption of client config
 encrypt_config() {
     get_master_pass
-    openssl enc -aes-256-cbc -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "$CLIENT_CONF" -out "${CLIENT_CONF}.enc"
+    openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -pass "pass:$MASTER_PASS" -in "$CLIENT_CONF" -out "${CLIENT_CONF}.enc"
     # Keep the plain text for the current display, then delete
 }
 

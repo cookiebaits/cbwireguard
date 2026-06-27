@@ -89,6 +89,7 @@ if [[ -n "$input_MTU" ]]; then
 fi
 
 SERVER_PRIVATE_IP="10.18.0.1"
+SERVER_SUBNET="10.18.0.0/24"
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
 apt-get update -y
@@ -118,11 +119,11 @@ SaveConfig = false
 
 PostUp = iptables -A FORWARD -i wg0 -j ACCEPT
 PostUp = iptables -A FORWARD -o wg0 -j ACCEPT
-PostUp = iptables -t nat -A POSTROUTING -s 10.18.0.0/24 -o $NETWORK_DEVICE -j MASQUERADE
+PostUp = iptables -t nat -A POSTROUTING -s $SERVER_SUBNET -o $NETWORK_DEVICE -j MASQUERADE
 PostUp = iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PreDown = iptables -D FORWARD -i wg0 -j ACCEPT
 PreDown = iptables -D FORWARD -o wg0 -j ACCEPT
-PreDown = iptables -t nat -D POSTROUTING -s 10.18.0.0/24 -o $NETWORK_DEVICE -j MASQUERADE
+PreDown = iptables -t nat -D POSTROUTING -s $SERVER_SUBNET -o $NETWORK_DEVICE -j MASQUERADE
 PreDown = iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 EOF
 
