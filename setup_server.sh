@@ -150,7 +150,6 @@ if systemctl list-units --type=service | grep -q "wg-quick@"; then
     # but we ensure the service is completely stopped.
 fi
 
-apt-get update -y
 apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq
 
 echo -e "${GREEN}Generating secure encryption keys...${NC}"
