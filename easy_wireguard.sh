@@ -39,13 +39,6 @@ if [[ "$EUID" -ne 0 ]]; then
     exit 1
 fi
 
-init_environment() {
-    if [[ ! -d "$INSTALL_DIR" ]]; then
-        mkdir -p "$INSTALL_DIR"
-    fi
-    chmod 700 "$INSTALL_DIR" 
-}
-
 fetch_and_run() {
     local script_name="$1"
     local script_path="./${script_name}"
@@ -86,6 +79,7 @@ display_menu() {
 [4] Configure clients (Check/Edit/Remove)
 [5] Backup & Restore Manager
 [6] Domain-Based Split Tunneling
+[7] Install/Manage Xray (Stealth Plugin)
 [s] Settings (MTU, DNS, AllowedIPs)
 ${RED}[r] Remove WireGuard server from this system${GREEN}
 [q] Exit
@@ -124,6 +118,12 @@ settings_menu() {
                 ;;
             b) break ;;
         esac
+
+        if [[ "$OPTION" != "q" ]]; then
+            echo -en "
+${GREEN}Press Enter to return to the main menu...${NC}"
+            read -r
+        fi
     done
 }
 
@@ -153,6 +153,7 @@ main() {
             4) fetch_and_run "user_manager.sh" ;;
             5) fetch_and_run "backup_manager.sh" ;;
             6) fetch_and_run "domain_bypass.sh" ;;
+            7) fetch_and_run "Xray-Installer.sh" ;;
             s) settings_menu ;;
             r)
                 fetch_and_run "remove_server.sh"
