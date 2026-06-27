@@ -22,6 +22,20 @@ if [[ "$EUID" -ne 0 ]]; then
     exit 1
 fi
 
+exclude_ip_from_0_0_0_0() {
+    local EXCLUDE_IP=$1
+    python3 -c "
+import ipaddress
+import sys
+try:
+    ip = ipaddress.IPv4Address('${EXCLUDE_IP}')
+    net = ipaddress.IPv4Network('0.0.0.0/0')
+    excluded = list(net.address_exclude(ipaddress.IPv4Network(f'{ip}/32')))
+    print(', '.join(str(n) for n in excluded))
+except Exception:
+    print('0.0.0.0/1, 128.0.0.0/1')
+"
+}
 
 get_master_pass() {
     if [[ -z "${MASTER_PASS:-}" ]]; then
@@ -61,7 +75,13 @@ PORT=$(grep -i "^ListenPort" /etc/wireguard/wg0.conf | awk '{print $3}')
 # P3: Respect MTU from server config if it exists
 SERVER_MTU=$(grep -i "^MTU" /etc/wireguard/wg0.conf | awk '{print $3}' || echo "$MTU")
 MTU=${SERVER_MTU:-$MTU}
-IP_PORT="$IP_ADR:$PORT"
+
+if [[ -n "${WSTUNNEL_PORT:-}" ]]; then
+    IP_PORT="127.0.0.1:51820"
+    ALLOWED_IPS=$(exclude_ip_from_0_0_0_0 "$IP_ADR")
+else
+    IP_PORT="$IP_ADR:$PORT"
+fi
 
 SERVER_PRIVATE_IP_PREFIX="10.18.0"
 LAST_IP=$(grep -oP "AllowedIPs\s*=\s*10\.18\.0\.\K[0-9]+" /etc/wireguard/wg0.conf | sort -n | tail -n 1 || true)
@@ -120,6 +140,15 @@ else
     echo -e "${GREEN}Config for client ${DEVICE_NAME}:${PURPLE}"
     cat "$CLIENT_CONF"
     echo -e "${NC}"
+fi
+
+if [[ -n "${WSTUNNEL_PORT:-}" ]]; then
+    echo -e "\n${PURPLE}======================================================${NC}"
+    echo -e "${GREEN}WireGuard over TLS (wstunnel) is enabled!${NC}"
+    echo -e "${PURPLE}To connect, first run wstunnel on your client device:${NC}"
+    echo -e "${GREEN}wstunnel client ws://${IP_ADR}:${WSTUNNEL_PORT} -L udp://51820:127.0.0.1:${PORT}${NC}"
+    echo -e "${PURPLE}Then activate your WireGuard tunnel.${NC}"
+    echo -e "${PURPLE}======================================================${NC}\n"
 fi
 
 encrypt_config

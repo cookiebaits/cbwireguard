@@ -13,10 +13,10 @@ if [[ "$EUID" -ne 0 ]]; then
     exit 1
 fi
 
-echo -e "${RED}================================================================${NC}"
-echo -e "${RED}WARNING: This will completely REMOVE WireGuard from this system!${NC}"
-echo -e "${RED}All configurations, keys, and client access will be destroyed.${NC}"
-echo -e "${RED}================================================================${NC}"
+echo -e "\n${RED}╔════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${RED}║ WARNING: This will completely REMOVE WireGuard!            ║${NC}"
+echo -e "${RED}║ All configurations, keys, and client access will be gone.  ║${NC}"
+echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
 echo -en "${PURPLE}Are you absolutely sure you want to proceed? [y/N]: ${NC}"
 read -r FLAG
 

@@ -133,12 +133,15 @@ delete_backup() {
 
 # The Sub-Menu Loop
 while true; do
-    echo -e "\n${GREEN}--- Backup & Restore Manager ---${NC}"
-    echo "[1] Create a new backup"
-    echo "[2] Restore an existing backup"
-    echo "[3] List existing backup files"
-    echo "${RED}[4] Delete a backup file${NC}"
-    echo "[0] Return to Main Menu"
+    echo -e "\n${PURPLE}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${PURPLE}║${NC} ${GREEN}Backup & Restore Manager${NC}                                   ${PURPLE}║${NC}"
+    echo -e "${PURPLE}╠════════════════════════════════════════════════════════════╣${NC}"
+    echo -e "${PURPLE}║${NC} [1] Create a new backup                                    ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} [2] Restore an existing backup                             ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} [3] List existing backup files                             ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} ${RED}[4] Delete a backup file${NC}                                   ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} [0] Return to Main Menu                                    ${PURPLE}║${NC}"
+    echo -e "${PURPLE}╚════════════════════════════════════════════════════════════╝${NC}"
     echo -en "${GREEN}Select an option [0-4]: ${NC}"
     read -r OPTION
 

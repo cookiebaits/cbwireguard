@@ -36,13 +36,16 @@ check_port_usage() {
     return 1 # Port is free
 }
 
-echo -e "${GREEN}Choose port for VPN:${NC}"
-echo "[1] 443"
-echo "[2] 53 (DNS)"
-echo "[3] 123 (NTP)"
-echo "[4] 1194 (OpenVPN UDP)"
-echo "[5] 500 (ISAKMP)"
-echo "[6] 4500 (IPsec NAT-T)"
+echo -e "\n${PURPLE}╔════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${PURPLE}║${NC} ${GREEN}Choose port for VPN:${NC}                                       ${PURPLE}║${NC}"
+echo -e "${PURPLE}╠════════════════════════════════════════════════════════════╣${NC}"
+echo -e "${PURPLE}║${NC} [1] 443                                                    ${PURPLE}║${NC}"
+echo -e "${PURPLE}║${NC} [2] 53 (DNS)                                               ${PURPLE}║${NC}"
+echo -e "${PURPLE}║${NC} [3] 123 (NTP)                                              ${PURPLE}║${NC}"
+echo -e "${PURPLE}║${NC} [4] 1194 (OpenVPN UDP)                                     ${PURPLE}║${NC}"
+echo -e "${PURPLE}║${NC} [5] 500 (ISAKMP)                                           ${PURPLE}║${NC}"
+echo -e "${PURPLE}║${NC} [6] 4500 (IPsec NAT-T)                                     ${PURPLE}║${NC}"
+echo -e "${PURPLE}╚════════════════════════════════════════════════════════════╝${NC}"
 echo -en "${PURPLE}Select option [1-6] or enter custom port [Default 443]: ${NC}"
 read -r input_VPN_PORT
 
@@ -88,12 +91,35 @@ if [[ -n "$input_MTU" ]]; then
     MTU="$input_MTU"
 fi
 
+echo -en "${GREEN}Enable WireGuard over TLS (Stealth Mode) using wstunnel? [y/N]: ${NC}"
+read -r input_WSTUNNEL
+if [[ "$input_WSTUNNEL" =~ ^[Yy]$ ]]; then
+    echo -en "${GREEN}Enter wstunnel port [Default 443]: ${NC}"
+    read -r input_WSTUNNEL_PORT
+    if [[ -z "$input_WSTUNNEL_PORT" ]]; then
+        WSTUNNEL_PORT="443"
+    else
+        WSTUNNEL_PORT="$input_WSTUNNEL_PORT"
+    fi
+    # Add to settings.conf
+    if grep -q "^WSTUNNEL_PORT=" "$SETTINGS_FILE" 2>/dev/null; then
+        sed -i "s|^WSTUNNEL_PORT=.*|WSTUNNEL_PORT=${WSTUNNEL_PORT}|" "$SETTINGS_FILE"
+    else
+        echo "WSTUNNEL_PORT=${WSTUNNEL_PORT}" >> "$SETTINGS_FILE"
+    fi
+else
+    # Remove if it existed before
+    if [[ -f "$SETTINGS_FILE" ]]; then
+        sed -i '/^WSTUNNEL_PORT=/d' "$SETTINGS_FILE"
+    fi
+fi
+
 SERVER_PRIVATE_IP="10.18.0.1"
 SERVER_SUBNET="10.18.0.0/24"
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
 apt-get update -y
-apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq
+apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq bc
 
 echo -e "${GREEN}Generating secure encryption keys...${NC}"
 mkdir -p /etc/wireguard
@@ -117,8 +143,8 @@ ListenPort = $PORT
 MTU = $MTU
 SaveConfig = false
 
-PostUp = iptables -A FORWARD -i wg0 -j ACCEPT
-PostUp = iptables -A FORWARD -o wg0 -j ACCEPT
+PostUp = iptables -I FORWARD 1 -i wg0 -j ACCEPT
+PostUp = iptables -I FORWARD 1 -o wg0 -j ACCEPT
 PostUp = iptables -t nat -A POSTROUTING -s $SERVER_SUBNET -o $NETWORK_DEVICE -j MASQUERADE
 PostUp = iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PreDown = iptables -D FORWARD -i wg0 -j ACCEPT
@@ -149,7 +175,45 @@ sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/d
 sed -i 's/#net\/ipv4\/ip_forward=1/net\/ipv4\/ip_forward=1/' /etc/ufw/sysctl.conf || true
 ufw allow "$PORT/udp"
 ufw allow "$SSH_PORT/tcp"
+if [[ -n "${WSTUNNEL_PORT:-}" ]]; then
+    ufw allow "$WSTUNNEL_PORT/tcp"
+fi
 ufw --force enable
+
+if [[ -n "${WSTUNNEL_PORT:-}" ]]; then
+    echo -e "${GREEN}Installing and configuring wstunnel...${NC}"
+    WSTUNNEL_VER="10.5.5"
+    if ! command -v wstunnel &> /dev/null; then
+        wget -qO /tmp/wstunnel.tar.gz "https://github.com/erebe/wstunnel/releases/download/v${WSTUNNEL_VER}/wstunnel_${WSTUNNEL_VER}_linux_amd64.tar.gz"
+        tar -xzf /tmp/wstunnel.tar.gz -C /tmp/
+        mv /tmp/wstunnel /usr/local/bin/wstunnel
+        chmod +x /usr/local/bin/wstunnel
+        rm -f /tmp/wstunnel.tar.gz
+    fi
+
+    cat <<EOF > /etc/systemd/system/wstunnel.service
+[Unit]
+Description=wstunnel service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/wstunnel server ws://0.0.0.0:${WSTUNNEL_PORT} --restrict-to 127.0.0.1:${PORT}
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable wstunnel.service
+    if ! systemctl restart wstunnel.service; then
+        echo -e "${RED}Error: Failed to start wstunnel service.${NC}"
+        journalctl -xeu wstunnel.service | tail -n 20
+        systemctl status wstunnel.service --no-pager
+        exit 1
+    fi
+fi
 
 echo -e "${GREEN}Starting WireGuard service...${NC}"
 systemctl enable wg-quick@wg0.service

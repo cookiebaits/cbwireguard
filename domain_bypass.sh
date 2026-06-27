@@ -75,15 +75,38 @@ remove_domain() {
     fi
 }
 
+add_streaming_services() {
+    local services=(
+        "netflix.com" "nflxvideo.net" "nflxext.com" "nflximg.net" "nflxso.net"
+        "hulu.com" "huluim.com" "hulustream.com"
+        "disneyplus.com" "bamgrid.com" "disney-plus.net" "dssott.com" "disney.com"
+        "hbomax.com" "max.com" "hbonow.com" "hbo.com"
+        "primevideo.com" "amazonvideo.com" "media-amazon.com"
+        "bbc.co.uk" "bbci.co.uk"
+    )
+    echo -e "${GREEN}Adding popular streaming services and their CDNs to bypass list...${NC}"
+    for domain in "${services[@]}"; do
+        if ! grep -Fxq "$domain" "$BYPASS_FILE"; then
+            echo "$domain" >> "$BYPASS_FILE"
+            echo -e "${PURPLE}Added: ${domain}${NC}"
+        fi
+    done
+    update_routes
+}
+
 main_menu() {
     init_bypass
     while true; do
-        echo -e "\n${PURPLE}--- Domain Bypass Manager (Split Tunneling) ---${NC}"
-        echo "[1] Add domain to bypass"
-        echo "[2] Remove domain from bypass"
-        echo "[3] List bypass domains"
-        echo "[4] Refresh/Apply routes"
-        echo "[0] Back to Main Menu"
+        echo -e "\n${PURPLE}╔════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${PURPLE}║${NC} ${GREEN}Domain Bypass Manager (Split Tunneling)${NC}                    ${PURPLE}║${NC}"
+        echo -e "${PURPLE}╠════════════════════════════════════════════════════════════╣${NC}"
+        echo -e "${PURPLE}║${NC} [1] Add domain to bypass                                   ${PURPLE}║${NC}"
+        echo -e "${PURPLE}║${NC} [2] Remove domain from bypass                              ${PURPLE}║${NC}"
+        echo -e "${PURPLE}║${NC} [3] List bypass domains                                    ${PURPLE}║${NC}"
+        echo -e "${PURPLE}║${NC} [4] Refresh/Apply routes                                   ${PURPLE}║${NC}"
+        echo -e "${PURPLE}║${NC} [5] Add streaming services to bypass list                  ${PURPLE}║${NC}"
+        echo -e "${PURPLE}║${NC} [0] Back to Main Menu                                      ${PURPLE}║${NC}"
+        echo -e "${PURPLE}╚════════════════════════════════════════════════════════════╝${NC}"
         echo -en "${GREEN}Option: ${NC}"
         read -r opt
         case "$opt" in
@@ -91,6 +114,7 @@ main_menu() {
             2) remove_domain ;;
             3) cat "$BYPASS_FILE" ;;
             4) update_routes ;;
+            5) add_streaming_services ;;
             0) break ;;
             *) echo -e "${RED}Invalid option.${NC}" ;;
         esac
