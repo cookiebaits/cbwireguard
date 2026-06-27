@@ -19,6 +19,8 @@ This wrapper dynamically pulls the latest scripts from GitHub, ensuring your ser
 
 ## 🚀 Key Feature Upgrades
 
+- **Enhanced Stealth & Bypassing:** Dynamically configure MTU, DNS, and AllowedIPs (split-tunneling) to bypass streaming service detection and restrictive firewalls.
+- **Integrated Cloak Plugin:** One-click installation of Cloak + Shadowsocks for a powerful secondary stealth layer.
 - **Domain-Based Split Tunneling:** Bypass specific domains from the VPN tunnel in real-time.
 - **Maximized Throughput:** Injects Kernel-level BBR (Bottleneck Bandwidth and RTT) and FQ queueing, paired with an optimized default MTU (1280) to eliminate packet fragmentation and maximize speeds.
 - **Zero-Downtime Hot Reloading:** Adding a new peer instantly injects them into the live server. Existing users are never disconnected when the configuration updates.
@@ -73,13 +75,16 @@ List: Shows all backups currently sitting in your directory and their file sizes
 
 Delete: Securely destroys backup archives to keep your server secure.
 
-## ⚙️ Step 6: Customizing Defaults (Option s)
+## 🕵️ Step 6: Cloak Stealth Plugin (Option 6)
+Integrate Cloak with Shadowsocks-Rust to provide an additional layer of obfuscation. This tunnels your VPN traffic inside what appears to be standard HTTPS traffic, making it nearly impossible to detect via Deep Packet Inspection (DPI).
+
+## ⚙️ Step 7: Customizing Defaults (Option s)
 You can now customize global defaults for all future clients:
 - **Default MTU:** Request specifically set to 1280 to bypass MTU-based detection.
 - **Default DNS:** Set to a high-privacy, ad-blocking DNS cluster.
-- **Default Allowed IPs:** Configured as `0.0.0.0/1, 128.0.0.0/1` by default.
+- **Default Allowed IPs:** Configured as `0.0.0.0/1, 128.0.0.0/1` by default to increase stealth.
 
-## 🗑️ Step 7: Removing the Server (Option r)
+## 🗑️ Step 8: Removing the Server (Option r)
 If you need to start fresh or remove the VPN, this option executes a total system wipe.
 
 Safely stops the systemd service.

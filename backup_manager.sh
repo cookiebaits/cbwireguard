@@ -34,7 +34,7 @@ create_backup() {
     echo
 
     echo -e "\n${GREEN}Creating encrypted backup...${NC}"
-    if tar -cz -C /etc wireguard | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -pass "pass:$BACKUP_PASS" -out "$BACKUP_FILE"; then
+    if tar -cz -C /etc wireguard | openssl enc -aes-256-cbc -salt -pbkdf2 -pass "pass:$BACKUP_PASS" -out "$BACKUP_FILE"; then
         chmod 600 "$BACKUP_FILE"
         echo -e "${PURPLE}Backup successfully created and encrypted: ${BACKUP_FILE}${NC}"
     else
@@ -79,7 +79,7 @@ restore_backup() {
             TEMP_DIR=$(mktemp -d)
             chmod 700 "$TEMP_DIR"
 
-            if openssl enc -aes-256-cbc -d -salt -pbkdf2 -iter 100000 -pass "pass:$BACKUP_PASS" -in "$TARGET" | tar -xz -C "$TEMP_DIR"; then
+            if openssl enc -aes-256-cbc -d -salt -pbkdf2 -pass "pass:$BACKUP_PASS" -in "$TARGET" | tar -xz -C "$TEMP_DIR"; then
                 mkdir -p /etc/wireguard
                 if [[ -d "$TEMP_DIR/wireguard" ]]; then
                     cp -a "$TEMP_DIR/wireguard/"* /etc/wireguard/
