@@ -31,13 +31,10 @@ if [[ "$FLAG" =~ ^[Yy]$ ]]; then
         systemctl disable wg-quick@wg0.service
     fi
 
-    if systemctl is-active --quiet wstunnel.service; then
-        echo -e "${GREEN}Stopping wstunnel service...${NC}"
-        systemctl stop wstunnel.service
-        systemctl disable wstunnel.service
-        rm -f /etc/systemd/system/wstunnel.service
-        systemctl daemon-reload
-        rm -f /usr/local/bin/wstunnel
+    if systemctl is-active --quiet awg-quick@awg0.service; then
+        echo -e "${GREEN}Stopping AmneziaWG service...${NC}"
+        systemctl stop awg-quick@awg0.service
+        systemctl disable awg-quick@awg0.service
     fi
 
     # 2. Revert the IP forwarding vulnerability
@@ -47,14 +44,16 @@ if [[ "$FLAG" =~ ^[Yy]$ ]]; then
     sysctl -p &> /dev/null
 
     # 3. Completely wipe the packages
-    echo -e "${GREEN}Uninstalling WireGuard...${NC}"
+    echo -e "${GREEN}Uninstalling VPN packages...${NC}"
     # Purge destroys the app configurations; autoremove cleans up unused dependencies
-    apt-get purge -y wireguard wireguard-tools
+    apt-get purge -y wireguard wireguard-tools amneziawg-tools amneziawg-dkms || true
+    add-apt-repository --remove -y ppa:amnezia/ppa >/dev/null 2>&1 || true
     apt-get autoremove -y
 
     # 4. Destroy the sensitive keys and configuration directory
-    echo -e "${GREEN}Deleting WireGuard keys and config directories...${NC}"
+    echo -e "${GREEN}Deleting keys and config directories...${NC}"
     rm -rf /etc/wireguard
+    rm -rf /etc/amnezia
 
     echo -e "${PURPLE}Done! WireGuard has been completely removed from this system.${NC}"
 else

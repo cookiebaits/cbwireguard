@@ -6,7 +6,6 @@ PURPLE='\033[0;35m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-CLIENT_DIR="/etc/wireguard/clients"
 SETTINGS_FILE="/root/easy_wireguard/settings.conf"
 
 if [[ -f "$SETTINGS_FILE" ]]; then
@@ -18,6 +17,18 @@ if [[ "$EUID" -ne 0 ]]; then
     echo -e "${RED}Security Error: Please run this script as root (sudo).${NC}"
     exit 1
 fi
+
+if [[ "${WG_TYPE:-standard}" == "amnezia" ]]; then
+    CONF_DIR="/etc/amnezia"
+    WG_IFACE="awg0"
+    WG_CMD="awg"
+else
+    CONF_DIR="/etc/wireguard"
+    WG_IFACE="wg0"
+    WG_CMD="wg"
+fi
+
+CLIENT_DIR="$CONF_DIR/clients"
 
 # P3: Master password for config encryption
 # For simplicity in this automated script, we'll use a hidden file or prompt
@@ -113,12 +124,12 @@ delete_user() {
         pubkey=$(echo "$privkey" | wg pubkey)
         
         if [[ -n "$pubkey" ]]; then
-            echo -e "${GREEN}Removing peer from live WireGuard...${NC}"
-            wg set wg0 peer "$pubkey" remove
+            echo -e "${GREEN}Removing peer from live VPN...${NC}"
+            $WG_CMD set $WG_IFACE peer "$pubkey" remove
         fi
         
-        echo -e "${GREEN}Removing from wg0.conf...${NC}"
-        sed -i "/# USER_START: $username/,/# USER_END: $username/d" /etc/wireguard/wg0.conf
+        echo -e "${GREEN}Removing from $WG_IFACE.conf...${NC}"
+        sed -i "/# USER_START: $username/,/# USER_END: $username/d" "$CONF_DIR/$WG_IFACE.conf"
         
         rm -f "$file"
         echo -e "${PURPLE}User $username deleted.${NC}"
