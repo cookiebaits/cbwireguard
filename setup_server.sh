@@ -88,6 +88,15 @@ if [[ -n "$input_MTU" ]]; then
     MTU="$input_MTU"
 fi
 
+# Automatically enable WStunnel for stealth mode (one-tap)
+WSTUNNEL_ENABLED=true
+if [[ "$PORT" == "443" ]]; then
+    WSTUNNEL_PORT="8443"
+else
+    WSTUNNEL_PORT="443"
+fi
+echo -e "${GREEN}Stealth Mode (WStunnel) will automatically be installed on TCP port ${WSTUNNEL_PORT}.${NC}"
+
 SERVER_PRIVATE_IP="10.18.0.1"
 SERVER_SUBNET="10.18.0.0/24"
 
@@ -147,9 +156,60 @@ sysctl -p
 echo -e "${GREEN}Configuring UFW Firewall...${NC}"
 sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw || true
 sed -i 's/#net\/ipv4\/ip_forward=1/net\/ipv4\/ip_forward=1/' /etc/ufw/sysctl.conf || true
-ufw allow "$PORT/udp"
-ufw allow "$SSH_PORT/tcp"
-ufw --force enable
+ufw allow "$PORT/udp" || true
+ufw allow "$SSH_PORT/tcp" || true
+if [[ "$WSTUNNEL_ENABLED" == "true" ]]; then
+    ufw allow "$WSTUNNEL_PORT/tcp" || true
+fi
+ufw --force enable || true
+
+if [[ "$WSTUNNEL_ENABLED" == "true" ]]; then
+    echo -e "${GREEN}Installing WStunnel...${NC}"
+    WSTUNNEL_LATEST_VERSION=$(curl -Ls -o /dev/null -w %{url_effective} https://github.com/erebe/wstunnel/releases/latest | grep -o '[^/]*$')
+    WSTUNNEL_DL_URL="https://github.com/erebe/wstunnel/releases/download/${WSTUNNEL_LATEST_VERSION}/wstunnel_${WSTUNNEL_LATEST_VERSION#v}_linux_amd64.tar.gz"
+    curl -sL "$WSTUNNEL_DL_URL" -o /tmp/wstunnel.tar.gz
+    tar -xzf /tmp/wstunnel.tar.gz -C /tmp
+    mv /tmp/wstunnel /usr/local/bin/wstunnel
+    chmod +x /usr/local/bin/wstunnel
+    rm -f /tmp/wstunnel.tar.gz
+
+    cat <<EOF > /etc/systemd/system/wstunnel.service
+[Unit]
+Description=WStunnel Server
+After=network.target wg-quick@wg0.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/wstunnel server ws://0.0.0.0:${WSTUNNEL_PORT} --restrict-to 127.0.0.1:${PORT}
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable wstunnel.service
+    systemctl restart wstunnel.service
+
+    # Update settings
+    if grep -q "^WSTUNNEL_ENABLED=" "$SETTINGS_FILE" 2>/dev/null; then
+        sed -i "s|^WSTUNNEL_ENABLED=.*|WSTUNNEL_ENABLED=true|" "$SETTINGS_FILE"
+    else
+        echo "WSTUNNEL_ENABLED=true" >> "$SETTINGS_FILE"
+    fi
+    if grep -q "^WSTUNNEL_PORT=" "$SETTINGS_FILE" 2>/dev/null; then
+        sed -i "s|^WSTUNNEL_PORT=.*|WSTUNNEL_PORT=${WSTUNNEL_PORT}|" "$SETTINGS_FILE"
+    else
+        echo "WSTUNNEL_PORT=${WSTUNNEL_PORT}" >> "$SETTINGS_FILE"
+    fi
+else
+    if grep -q "^WSTUNNEL_ENABLED=" "$SETTINGS_FILE" 2>/dev/null; then
+        sed -i "s|^WSTUNNEL_ENABLED=.*|WSTUNNEL_ENABLED=false|" "$SETTINGS_FILE"
+    else
+        echo "WSTUNNEL_ENABLED=false" >> "$SETTINGS_FILE"
+    fi
+fi
 
 echo -e "${GREEN}Starting WireGuard service...${NC}"
 systemctl enable wg-quick@wg0.service
@@ -166,4 +226,7 @@ systemctl status --no-pager -l wg-quick@wg0.service
 echo -e "\n${PURPLE}======================================================${NC}"
 echo -e "${GREEN}Server Setup Complete!${NC}"
 echo -e "${PURPLE}Your WireGuard server is running on port: ${PORT}${NC}"
+if [[ "$WSTUNNEL_ENABLED" == "true" ]]; then
+    echo -e "${PURPLE}WStunnel is running on TCP port: ${WSTUNNEL_PORT}${NC}"
+fi
 echo -e "${PURPLE}======================================================${NC}\n"

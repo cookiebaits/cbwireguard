@@ -122,5 +122,14 @@ else
     echo -e "${NC}"
 fi
 
+if [[ "${WSTUNNEL_ENABLED:-false}" == "true" ]]; then
+    echo -e "\n${GREEN}=== Stealth Mode (WStunnel) Instructions ===${NC}"
+    echo -e "${PURPLE}To bypass DPI and streaming site blocks, you can connect via WStunnel.${NC}"
+    echo -e "${PURPLE}Run this command on your local machine alongside WireGuard:${NC}"
+    echo -e "wstunnel client -L 'udp://${PORT}:127.0.0.1:${PORT}?timeout_sec=0' ws://${IP_ADR}:${WSTUNNEL_PORT}"
+    echo -e "${PURPLE}Then, change the 'Endpoint' in your WireGuard client config to: ${NC}127.0.0.1:${PORT}"
+    echo -e "${GREEN}============================================${NC}\n"
+fi
+
 encrypt_config
 rm -f "$CLIENT_CONF"
