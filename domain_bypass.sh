@@ -7,7 +7,6 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 BYPASS_FILE="/etc/wireguard/bypass_domains.txt"
-SETTINGS_FILE="/root/easy_wireguard/settings.conf"
 
 if [[ "$EUID" -ne 0 ]]; then
     echo -e "${RED}Security Error: Please run this script as root (sudo).${NC}"
@@ -38,7 +37,7 @@ update_routes() {
         [[ -z "$domain" || "$domain" =~ ^# ]] && continue
         echo -e "Resolving ${PURPLE}${domain}${NC}..."
         ips=$(dig +short "$domain" 2>/dev/null | grep -E '^[0-9.]+$' || true)
-
+        
         if [[ -z "$ips" ]]; then
             echo -e "${RED}Warning: Could not resolve ${domain}, skipping.${NC}"
             continue
@@ -84,7 +83,7 @@ remove_domain() {
 add_streaming_services() {
     local services=(
         "netflix.com" "nflxvideo.net" "nflxext.com" "nflximg.net" "nflxso.net"
-        "hulu.com" "huluim.com" "hulustream.com"
+        "hulu.com" "huluim.com" "hulustream.com" 
         "disneyplus.com" "bamgrid.com" "disney-plus.net" "dssott.com" "disney.com"
         "hbomax.com" "max.com" "hbonow.com" "hbo.com"
         "primevideo.com" "amazonvideo.com" "media-amazon.com"

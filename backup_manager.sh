@@ -20,21 +20,25 @@ get_backups() {
 }
 
 create_backup() {
-    if [[ ! -d "/etc/wireguard" ]]; then
-        echo -e "${RED}Error: /etc/wireguard directory not found. Is the server installed?${NC}"
+    if [[ -d "/etc/amnezia" ]]; then
+        BACKUP_TARGET="amnezia"
+    elif [[ -d "/etc/wireguard" ]]; then
+        BACKUP_TARGET="wireguard"
+    else
+        echo -e "${RED}Error: VPN configuration directory not found. Is the server installed?${NC}"
         return
     fi
 
     CURRENT_DATE=$(date +"%Y-%m-%d_%H-%M-%S")
     HOST_NAME=$(hostname -s)
-    BACKUP_FILE="easy-wireguard-server-${CURRENT_DATE}-${HOST_NAME}-backup.tar.gz.enc"
+    BACKUP_FILE="easy-${BACKUP_TARGET}-server-${CURRENT_DATE}-${HOST_NAME}-backup.tar.gz.enc"
 
     echo -en "${GREEN}Enter encryption password for backup: ${NC}"
     read -rs BACKUP_PASS
     echo
 
     echo -e "\n${GREEN}Creating encrypted backup...${NC}"
-    if tar -cz -C /etc wireguard | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -pass "pass:$BACKUP_PASS" -out "$BACKUP_FILE"; then
+    if tar -cz -C /etc "$BACKUP_TARGET" | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -pass "pass:$BACKUP_PASS" -out "$BACKUP_FILE"; then
         chmod 600 "$BACKUP_FILE"
         echo -e "${PURPLE}Backup successfully created and encrypted: ${BACKUP_FILE}${NC}"
     else
@@ -80,21 +84,33 @@ restore_backup() {
             chmod 700 "$TEMP_DIR"
 
             if openssl enc -aes-256-cbc -d -salt -pbkdf2 -iter 100000 -pass "pass:$BACKUP_PASS" -in "$TARGET" | tar -xz -C "$TEMP_DIR"; then
-                mkdir -p /etc/wireguard
-                if [[ -d "$TEMP_DIR/wireguard" ]]; then
-                    cp -a "$TEMP_DIR/wireguard/"* /etc/wireguard/
-                elif [[ -d "$TEMP_DIR/etc/wireguard" ]]; then
-                    cp -a "$TEMP_DIR/etc/wireguard/"* /etc/wireguard/
+                if [[ -d "$TEMP_DIR/amnezia" || -d "$TEMP_DIR/etc/amnezia" ]]; then
+                    mkdir -p /etc/amnezia
+                    if [[ -d "$TEMP_DIR/amnezia" ]]; then
+                        cp -a "$TEMP_DIR/amnezia/"* /etc/amnezia/
+                    else
+                        cp -a "$TEMP_DIR/etc/amnezia/"* /etc/amnezia/
+                    fi
+                    chmod 700 /etc/amnezia
+                    find /etc/amnezia -type f -exec chmod 600 {} +
+                    [[ -d "/etc/amnezia/clients" ]] && chmod 700 /etc/amnezia/clients
+                    echo -e "${GREEN}Restarting AmneziaWG service...${NC}"
+                    systemctl restart awg-quick@awg0.service || true
+                else
+                    mkdir -p /etc/wireguard
+                    if [[ -d "$TEMP_DIR/wireguard" ]]; then
+                        cp -a "$TEMP_DIR/wireguard/"* /etc/wireguard/
+                    elif [[ -d "$TEMP_DIR/etc/wireguard" ]]; then
+                        cp -a "$TEMP_DIR/etc/wireguard/"* /etc/wireguard/
+                    fi
+                    chmod 700 /etc/wireguard
+                    find /etc/wireguard -type f -exec chmod 600 {} +
+                    [[ -d "/etc/wireguard/clients" ]] && chmod 700 /etc/wireguard/clients
+                    echo -e "${GREEN}Restarting WireGuard service...${NC}"
+                    systemctl restart wg-quick@wg0.service || true
                 fi
 
-                # Secure everything
-                chmod 700 /etc/wireguard
-                find /etc/wireguard -type f -exec chmod 600 {} +
-                [[ -d "/etc/wireguard/clients" ]] && chmod 700 /etc/wireguard/clients
                 rm -rf "$TEMP_DIR"
-
-                echo -e "${GREEN}Restarting WireGuard service...${NC}"
-                systemctl restart wg-quick@wg0.service
                 echo -e "${PURPLE}Backup successfully restored!${NC}"
             else
                 echo -e "${RED}Error: Restoration failed. Incorrect password?${NC}"
