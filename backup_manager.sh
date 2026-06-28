@@ -20,8 +20,8 @@ get_backups() {
 }
 
 create_backup() {
-    if [[ -d "/etc/amnezia" ]]; then
-        BACKUP_TARGET="amnezia"
+    if [[ -d "/etc/amnezia/amneziawg" ]]; then
+        BACKUP_TARGET="amnezia/amneziawg"
     elif [[ -d "/etc/wireguard" ]]; then
         BACKUP_TARGET="wireguard"
     else
@@ -84,16 +84,18 @@ restore_backup() {
             chmod 700 "$TEMP_DIR"
 
             if openssl enc -aes-256-cbc -d -salt -pbkdf2 -iter 100000 -pass "pass:$BACKUP_PASS" -in "$TARGET" | tar -xz -C "$TEMP_DIR"; then
-                if [[ -d "$TEMP_DIR/amnezia" || -d "$TEMP_DIR/etc/amnezia" ]]; then
-                    mkdir -p /etc/amnezia
-                    if [[ -d "$TEMP_DIR/amnezia" ]]; then
-                        cp -a "$TEMP_DIR/amnezia/"* /etc/amnezia/
-                    else
-                        cp -a "$TEMP_DIR/etc/amnezia/"* /etc/amnezia/
+                if [[ -d "$TEMP_DIR/amnezia/amneziawg" || -d "$TEMP_DIR/etc/amnezia/amneziawg" || -d "$TEMP_DIR/amneziawg" ]]; then
+                    mkdir -p /etc/amnezia/amneziawg
+                    if [[ -d "$TEMP_DIR/amnezia/amneziawg" ]]; then
+                        cp -a "$TEMP_DIR/amnezia/amneziawg/"* /etc/amnezia/amneziawg/
+                    elif [[ -d "$TEMP_DIR/etc/amnezia/amneziawg" ]]; then
+                        cp -a "$TEMP_DIR/etc/amnezia/amneziawg/"* /etc/amnezia/amneziawg/
+                    elif [[ -d "$TEMP_DIR/amneziawg" ]]; then
+                        cp -a "$TEMP_DIR/amneziawg/"* /etc/amnezia/amneziawg/
                     fi
-                    chmod 700 /etc/amnezia
-                    find /etc/amnezia -type f -exec chmod 600 {} +
-                    [[ -d "/etc/amnezia/clients" ]] && chmod 700 /etc/amnezia/clients
+                    chmod 700 /etc/amnezia/amneziawg
+                    find /etc/amnezia/amneziawg -type f -exec chmod 600 {} +
+                    [[ -d "/etc/amnezia/amneziawg/clients" ]] && chmod 700 /etc/amnezia/amneziawg/clients
                     echo -e "${GREEN}Restarting AmneziaWG service...${NC}"
                     systemctl restart awg-quick@awg0.service || true
                 else

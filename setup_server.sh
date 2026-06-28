@@ -133,9 +133,9 @@ fi
 
 echo -e "${GREEN}Generating secure encryption keys...${NC}"
 if [[ "$WG_TYPE" == "amnezia" ]]; then
-    mkdir -p /etc/amnezia
-    chmod 700 /etc/amnezia
-    CONF_DIR="/etc/amnezia"
+    mkdir -p /etc/amnezia/amneziawg
+    chmod 700 /etc/amnezia/amneziawg
+    CONF_DIR="/etc/amnezia/amneziawg"
 else
     mkdir -p /etc/wireguard
     chmod 700 /etc/wireguard

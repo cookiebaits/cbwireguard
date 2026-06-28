@@ -19,7 +19,7 @@ if [[ "$EUID" -ne 0 ]]; then
 fi
 
 if [[ "${WG_TYPE:-standard}" == "amnezia" ]]; then
-    CONF_DIR="/etc/amnezia"
+    CONF_DIR="/etc/amnezia/amneziawg"
     WG_IFACE="awg0"
     WG_CMD="awg"
 else
