@@ -36,13 +36,16 @@ check_port_usage() {
     return 1 # Port is free
 }
 
-echo -e "${GREEN}Choose port for VPN (Recommended Stealthy Ports):${NC}"
-echo "[1] 443 (HTTPS/QUIC - Most Stealthy)"
-echo "[2] 53 (DNS)"
-echo "[3] 123 (NTP)"
-echo "[4] 1194 (OpenVPN UDP)"
-echo "[5] 500 (ISAKMP)"
-echo "[6] 4500 (IPsec NAT-T)"
+echo -e "\n${PURPLE}╔════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${PURPLE}║${NC} ${GREEN}Choose port for VPN:${NC}                                       ${PURPLE}║${NC}"
+echo -e "${PURPLE}╠════════════════════════════════════════════════════════════╣${NC}"
+echo -e "${PURPLE}║${NC} [1] 443                                                    ${PURPLE}║${NC}"
+echo -e "${PURPLE}║${NC} [2] 53 (DNS)                                               ${PURPLE}║${NC}"
+echo -e "${PURPLE}║${NC} [3] 123 (NTP)                                              ${PURPLE}║${NC}"
+echo -e "${PURPLE}║${NC} [4] 1194 (OpenVPN UDP)                                     ${PURPLE}║${NC}"
+echo -e "${PURPLE}║${NC} [5] 500 (ISAKMP)                                           ${PURPLE}║${NC}"
+echo -e "${PURPLE}║${NC} [6] 4500 (IPsec NAT-T)                                     ${PURPLE}║${NC}"
+echo -e "${PURPLE}╚════════════════════════════════════════════════════════════╝${NC}"
 echo -en "${PURPLE}Select option [1-6] or enter custom port [Default 443]: ${NC}"
 read -r input_VPN_PORT
 
@@ -82,76 +85,41 @@ else
     SSH_PORT="$input_SSH_PORT"
 fi
 
-
-echo -e "${GREEN}Choose port for Xray VLESS (Recommended Cloudflare/CDN Ports):${NC}"
-echo "[1] 8880 (HTTP/CDN - Default)"
-echo "[2] 443 (HTTPS - Best for TLS)"
-echo "[3] 8443 (Alt-HTTPS)"
-echo "[4] 2053 (Alt-HTTPS)"
-echo "[5] 2083 (Alt-HTTPS)"
-echo "[6] 2087 (Alt-HTTPS)"
-echo -en "${PURPLE}Select option [1-6] or enter custom port [Default 8880]: ${NC}"
-read -r input_VLESS_PORT
-
-while true; do
-    case "$input_VLESS_PORT" in
-        1) XRAY_VLESS_PORT="8880" ;;
-        2) XRAY_VLESS_PORT="443" ;;
-        3) XRAY_VLESS_PORT="8443" ;;
-        4) XRAY_VLESS_PORT="2053" ;;
-        5) XRAY_VLESS_PORT="2083" ;;
-        6) XRAY_VLESS_PORT="2087" ;;
-        "") XRAY_VLESS_PORT="8880" ;;
-        *)
-            if [[ "$input_VLESS_PORT" =~ ^[0-9]+$ ]]; then
-                XRAY_VLESS_PORT="$input_VLESS_PORT"
-            else
-                XRAY_VLESS_PORT="8880"
-                echo -e "${RED}Invalid input. Defaulting to 8880.${NC}"
-            fi
-            ;;
-    esac
-
-    if check_port_usage "$XRAY_VLESS_PORT"; then
-        echo -e "${RED}Error: Port ${XRAY_VLESS_PORT} is already in use by another process!${NC}"
-        echo -en "${GREEN}Please enter another port or select from the menu above: ${NC}"
-        read -r input_VLESS_PORT
-    elif [[ "$XRAY_VLESS_PORT" == "$PORT" ]]; then
-        echo -e "${RED}Error: Port ${XRAY_VLESS_PORT} is already selected for WireGuard!${NC}"
-        echo -en "${GREEN}Please enter a different port for VLESS: ${NC}"
-        read -r input_VLESS_PORT
-    else
-        break
-    fi
-done
-
-export XRAY_VLESS_PORT
-
-mkdir -p /root/easy_wireguard
-echo "XRAY_VLESS_PORT=${XRAY_VLESS_PORT}" >> /root/easy_wireguard/settings.conf
-
 echo -en "${GREEN}Enter MTU, leave blank for default [${MTU}]: ${NC}"
 read -r input_MTU
 if [[ -n "$input_MTU" ]]; then
     MTU="$input_MTU"
 fi
 
-SERVER_PRIVATE_IP="10.18.0.1"
-
-echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
-# Scan for existing WireGuard services
-if systemctl list-units --type=service | grep -q "wg-quick@"; then
-    echo -e "${PURPLE}Existing WireGuard service detected. Bringing it down for clean installation...${NC}"
-    for service in $(systemctl list-units --type=service | grep "wg-quick@" | awk '{print $1}'); do
-        systemctl stop "$service" || true
-        systemctl disable "$service" || true
-    done
-    # We do not fully uninstall packages here as we are immediately reinstalling/reconfiguring,
-    # but we ensure the service is completely stopped.
+echo -en "${GREEN}Enable WireGuard over TLS (Stealth Mode) using wstunnel? [y/N]: ${NC}"
+read -r input_WSTUNNEL
+if [[ "$input_WSTUNNEL" =~ ^[Yy]$ ]]; then
+    echo -en "${GREEN}Enter wstunnel port [Default 443]: ${NC}"
+    read -r input_WSTUNNEL_PORT
+    if [[ -z "$input_WSTUNNEL_PORT" ]]; then
+        WSTUNNEL_PORT="443"
+    else
+        WSTUNNEL_PORT="$input_WSTUNNEL_PORT"
+    fi
+    # Add to settings.conf
+    if grep -q "^WSTUNNEL_PORT=" "$SETTINGS_FILE" 2>/dev/null; then
+        sed -i "s|^WSTUNNEL_PORT=.*|WSTUNNEL_PORT=${WSTUNNEL_PORT}|" "$SETTINGS_FILE"
+    else
+        echo "WSTUNNEL_PORT=${WSTUNNEL_PORT}" >> "$SETTINGS_FILE"
+    fi
+else
+    # Remove if it existed before
+    if [[ -f "$SETTINGS_FILE" ]]; then
+        sed -i '/^WSTUNNEL_PORT=/d' "$SETTINGS_FILE"
+    fi
 fi
 
+SERVER_PRIVATE_IP="10.18.0.1"
+SERVER_SUBNET="10.18.0.0/24"
+
+echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
 apt-get update -y
-apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq
+apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq bc
 
 echo -e "${GREEN}Generating secure encryption keys...${NC}"
 mkdir -p /etc/wireguard
@@ -175,10 +143,14 @@ ListenPort = $PORT
 MTU = $MTU
 SaveConfig = false
 
-PostUp = ufw route allow in on wg0 out on $NETWORK_DEVICE
-PostUp = iptables -t nat -A POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
-PreDown = ufw route delete allow in on wg0 out on $NETWORK_DEVICE
-PreDown = iptables -t nat -D POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
+PostUp = iptables -I FORWARD 1 -i wg0 -j ACCEPT
+PostUp = iptables -I FORWARD 1 -o wg0 -j ACCEPT
+PostUp = iptables -t nat -A POSTROUTING -s $SERVER_SUBNET -o $NETWORK_DEVICE -j MASQUERADE
+PostUp = iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+PreDown = iptables -D FORWARD -i wg0 -j ACCEPT
+PreDown = iptables -D FORWARD -o wg0 -j ACCEPT
+PreDown = iptables -t nat -D POSTROUTING -s $SERVER_SUBNET -o $NETWORK_DEVICE -j MASQUERADE
+PreDown = iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 EOF
 
 chmod 600 /etc/wireguard/wg0.conf
@@ -187,19 +159,67 @@ echo -e "${GREEN}Optimizing Network Throughput (BBR & Forwarding)...${NC}"
 sed -i '/net.ipv4.ip_forward/d' /etc/sysctl.conf
 sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
+sed -i '/net.ipv4.conf.all.rp_filter/d' /etc/sysctl.conf
+sed -i '/net.ipv4.conf.default.rp_filter/d' /etc/sysctl.conf
 
 echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
 echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
 echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
-# P2: Harden network stack
-echo "net.ipv4.conf.all.rp_filter=1" >> /etc/sysctl.conf
-echo "net.ipv4.conf.default.rp_filter=1" >> /etc/sysctl.conf
+# Advanced TCP Buffer and MTU Optimizations for Max Throughput
+echo "net.core.rmem_max=2500000" >> /etc/sysctl.conf
+echo "net.core.wmem_max=2500000" >> /etc/sysctl.conf
+echo "net.ipv4.tcp_rmem=4096 87380 2500000" >> /etc/sysctl.conf
+echo "net.ipv4.tcp_wmem=4096 16384 2500000" >> /etc/sysctl.conf
+echo "net.ipv4.tcp_mtu_probing=1" >> /etc/sysctl.conf
+# P2: Harden network stack (using loose mode to prevent routing drops)
+echo "net.ipv4.conf.all.rp_filter=2" >> /etc/sysctl.conf
+echo "net.ipv4.conf.default.rp_filter=2" >> /etc/sysctl.conf
 sysctl -p
 
 echo -e "${GREEN}Configuring UFW Firewall...${NC}"
+sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw || true
+sed -i 's/#net\/ipv4\/ip_forward=1/net\/ipv4\/ip_forward=1/' /etc/ufw/sysctl.conf || true
 ufw allow "$PORT/udp"
 ufw allow "$SSH_PORT/tcp"
+if [[ -n "${WSTUNNEL_PORT:-}" ]]; then
+    ufw allow "$WSTUNNEL_PORT/tcp"
+fi
 ufw --force enable
+
+if [[ -n "${WSTUNNEL_PORT:-}" ]]; then
+    echo -e "${GREEN}Installing and configuring wstunnel...${NC}"
+    WSTUNNEL_VER="10.5.5"
+    if ! command -v wstunnel &> /dev/null; then
+        wget -qO /tmp/wstunnel.tar.gz "https://github.com/erebe/wstunnel/releases/download/v${WSTUNNEL_VER}/wstunnel_${WSTUNNEL_VER}_linux_amd64.tar.gz"
+        tar -xzf /tmp/wstunnel.tar.gz -C /tmp/
+        mv /tmp/wstunnel /usr/local/bin/wstunnel
+        chmod +x /usr/local/bin/wstunnel
+        rm -f /tmp/wstunnel.tar.gz
+    fi
+
+    cat <<EOF > /etc/systemd/system/wstunnel.service
+[Unit]
+Description=wstunnel service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/wstunnel server ws://0.0.0.0:${WSTUNNEL_PORT} --restrict-to 127.0.0.1:${PORT}
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable wstunnel.service
+    if ! systemctl restart wstunnel.service; then
+        echo -e "${RED}Error: Failed to start wstunnel service.${NC}"
+        journalctl -xeu wstunnel.service | tail -n 20
+        systemctl status wstunnel.service --no-pager
+        exit 1
+    fi
+fi
 
 echo -e "${GREEN}Starting WireGuard service...${NC}"
 systemctl enable wg-quick@wg0.service
@@ -212,73 +232,6 @@ if ! systemctl restart wg-quick@wg0.service; then
     exit 1
 fi
 systemctl status --no-pager -l wg-quick@wg0.service
-
-echo -e "${GREEN}Deploying Xray Stealth Protocol...${NC}"
-if [[ ! -f "./Xray-Installer.sh" ]]; then
-    echo -e "${PURPLE}Fetching Xray-Installer.sh from repository...${NC}"
-    curl -sSfL "${GIT_REPO:-https://raw.githubusercontent.com/cookiebaits/cbwireguard/main}/Xray-Installer.sh" -o ./Xray-Installer.sh || true
-    if [[ ! -f "./Xray-Installer.sh" ]]; then
-        echo -e "${RED}Failed to fetch Xray-Installer.sh. Please place it in the directory manually.${NC}"
-        return 1 2>/dev/null || true
-    fi
-    chmod +x ./Xray-Installer.sh
-fi
-./Xray-Installer.sh --install
-
-echo -en "${GREEN}Install wstunnel (WireGuard over TLS) for stealth? [y/N]: ${NC}"
-read -r install_wstunnel
-if [[ "$install_wstunnel" =~ ^[Yy]$ ]]; then
-    echo -en "${GREEN}Choose a port for wstunnel [Default 4433]: ${NC}"
-    read -r WSTUNNEL_PORT
-    WSTUNNEL_PORT=${WSTUNNEL_PORT:-4433}
-
-    echo "WSTUNNEL_PORT=${WSTUNNEL_PORT}" >> /root/easy_wireguard/settings.conf
-
-    echo -e "${GREEN}Downloading and installing wstunnel...${NC}"
-    curl -sSL "https://github.com/erebe/wstunnel/releases/download/v10.5.5/wstunnel_10.5.5_linux_amd64.tar.gz" | tar -xz -C /usr/local/bin wstunnel
-    chmod +x /usr/local/bin/wstunnel
-
-    cat <<EOF > /etc/systemd/system/wstunnel.service
-[Unit]
-Description=wstunnel server
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/wstunnel server wss://[::]:${WSTUNNEL_PORT} --restrict-to 127.0.0.1:${PORT}
-Restart=always
-User=root
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    systemctl daemon-reload
-    systemctl enable wstunnel
-    systemctl restart wstunnel
-
-    ufw allow "$WSTUNNEL_PORT/tcp"
-fi
-
-echo -en "${GREEN}Enable default Split Tunneling for streaming services (Netflix, Hulu, Disney+, etc.)? [y/N]: ${NC}"
-read -r split_tunnel_choice
-if [[ "$split_tunnel_choice" =~ ^[Yy]$ ]]; then
-    echo -e "${GREEN}Configuring default bypass domains...${NC}"
-    cat <<EOF > /etc/wireguard/bypass_domains.txt
-netflix.com
-hulu.com
-disneyplus.com
-hbomax.com
-max.com
-EOF
-    chmod 600 /etc/wireguard/bypass_domains.txt
-    if [[ -f "./domain_bypass.sh" ]]; then
-        echo -e "${GREEN}Applying routes...${NC}"
-        ./domain_bypass.sh << 'EOF_INPUT' || true
-4
-0
-EOF_INPUT
-    fi
-fi
 
 echo -e "\n${PURPLE}======================================================${NC}"
 echo -e "${GREEN}Server Setup Complete!${NC}"

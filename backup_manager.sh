@@ -34,7 +34,7 @@ create_backup() {
     echo
 
     echo -e "\n${GREEN}Creating encrypted backup...${NC}"
-    if tar -cz -C /etc wireguard | openssl enc -aes-256-cbc -salt -pbkdf2 -pass "pass:$BACKUP_PASS" -out "$BACKUP_FILE"; then
+    if tar -cz -C /etc wireguard | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -pass "pass:$BACKUP_PASS" -out "$BACKUP_FILE"; then
         chmod 600 "$BACKUP_FILE"
         echo -e "${PURPLE}Backup successfully created and encrypted: ${BACKUP_FILE}${NC}"
     else
@@ -79,7 +79,7 @@ restore_backup() {
             TEMP_DIR=$(mktemp -d)
             chmod 700 "$TEMP_DIR"
 
-            if openssl enc -aes-256-cbc -d -salt -pbkdf2 -pass "pass:$BACKUP_PASS" -in "$TARGET" | tar -xz -C "$TEMP_DIR"; then
+            if openssl enc -aes-256-cbc -d -salt -pbkdf2 -iter 100000 -pass "pass:$BACKUP_PASS" -in "$TARGET" | tar -xz -C "$TEMP_DIR"; then
                 mkdir -p /etc/wireguard
                 if [[ -d "$TEMP_DIR/wireguard" ]]; then
                     cp -a "$TEMP_DIR/wireguard/"* /etc/wireguard/
@@ -133,12 +133,15 @@ delete_backup() {
 
 # The Sub-Menu Loop
 while true; do
-    echo -e "\n${GREEN}--- Backup & Restore Manager ---${NC}"
-    echo "[1] Create a new backup"
-    echo "[2] Restore an existing backup"
-    echo "[3] List existing backup files"
-    echo "${RED}[4] Delete a backup file${NC}"
-    echo "[0] Return to Main Menu"
+    echo -e "\n${PURPLE}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${PURPLE}║${NC} ${GREEN}Backup & Restore Manager${NC}                                   ${PURPLE}║${NC}"
+    echo -e "${PURPLE}╠════════════════════════════════════════════════════════════╣${NC}"
+    echo -e "${PURPLE}║${NC} [1] Create a new backup                                    ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} [2] Restore an existing backup                             ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} [3] List existing backup files                             ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} ${RED}[4] Delete a backup file${NC}                                   ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} [0] Return to Main Menu                                    ${PURPLE}║${NC}"
+    echo -e "${PURPLE}╚════════════════════════════════════════════════════════════╝${NC}"
     echo -en "${GREEN}Select an option [0-4]: ${NC}"
     read -r OPTION
 

@@ -33,15 +33,20 @@ get_master_pass() {
 
 encrypt_file() {
     local file="$1"
-    get_master_pass
-    openssl enc -aes-256-cbc -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "$file" -out "${file}.enc"
+    if [[ -z "${MASTER_PASS:-}" ]]; then
+        echo -en "${GREEN}Enter Encryption password: ${NC}"
+        read -rs MASTER_PASS
+        echo
+        export MASTER_PASS
+    fi
+    openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -pass "pass:$MASTER_PASS" -in "$file" -out "${file}.enc"
     rm -f "$file"
 }
 
 decrypt_file_to_stdout() {
     local file="$1"
     get_master_pass
-    openssl enc -aes-256-cbc -d -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "$file" 2>/dev/null || echo "FAILED"
+    openssl enc -aes-256-cbc -d -salt -pbkdf2 -iter 100000 -pass "pass:$MASTER_PASS" -in "$file" 2>/dev/null || echo "FAILED"
 }
 
 list_users() {
@@ -61,6 +66,7 @@ list_users() {
 }
 
 show_user() {
+    unset MASTER_PASS
     list_users || return
     echo -en "${GREEN}Enter username to view: ${NC}"
     read -r username
@@ -70,6 +76,7 @@ show_user() {
         local content
         content=$(decrypt_file_to_stdout "$file")
         if [[ "$content" == "FAILED" ]]; then
+            unset MASTER_PASS
             echo -e "${RED}Error: Decryption failed. Incorrect master password?${NC}"
         else
             echo -e "${PURPLE}--- Configuration for $username ---${NC}"
@@ -86,6 +93,7 @@ show_user() {
 }
 
 delete_user() {
+    unset MASTER_PASS
     list_users || return
     echo -en "${RED}Enter username to DELETE: ${NC}"
     read -r username
@@ -95,6 +103,7 @@ delete_user() {
         local content
         content=$(decrypt_file_to_stdout "$file")
         if [[ "$content" == "FAILED" ]]; then
+            unset MASTER_PASS
             echo -e "${RED}Error: Decryption failed.${NC}"
             return
         fi
@@ -119,6 +128,7 @@ delete_user() {
 }
 
 edit_user() {
+    unset MASTER_PASS
     list_users || return
     echo -en "${GREEN}Enter username to EDIT: ${NC}"
     read -r username
@@ -128,12 +138,14 @@ edit_user() {
         local content
         content=$(decrypt_file_to_stdout "$file")
         if [[ "$content" == "FAILED" ]]; then
+            unset MASTER_PASS
             echo -e "${RED}Error: Decryption failed.${NC}"
             return
         fi
         
         local temp_file
         temp_file=$(mktemp)
+        trap 'rm -f "$temp_file"' RETURN EXIT
         echo "$content" > "$temp_file"
         
         echo -e "${GREEN}Editing configuration for $username...${NC}"
@@ -150,6 +162,7 @@ edit_user() {
 }
 
 show_user_by_name() {
+    unset MASTER_PASS
     local username="$1"
     local file="${CLIENT_DIR}/${username}.conf.enc"
     
@@ -157,6 +170,7 @@ show_user_by_name() {
         local content
         content=$(decrypt_file_to_stdout "$file")
         if [[ "$content" == "FAILED" ]]; then
+            unset MASTER_PASS
             echo -e "${RED}Error: Decryption failed. Incorrect master password?${NC}"
         else
             echo -e "${PURPLE}--- Configuration for $username ---${NC}"
@@ -179,12 +193,15 @@ if [[ "${1:-}" == "--show" && -n "${2:-}" ]]; then
 fi
 
 while true; do
-    echo -e "\n${PURPLE}--- User Management (Configure Clients) ---${NC}"
-    echo "[1] List users"
-    echo "[2] Check configuration (Show QR/Text)"
-    echo "[3] Edit configuration"
-    echo "${RED}[4] Remove user (Delete)${NC}"
-    echo "[0] Back to Main Menu"
+    echo -e "\n${PURPLE}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${PURPLE}║${NC} ${GREEN}User Management (Configure Clients)${NC}                        ${PURPLE}║${NC}"
+    echo -e "${PURPLE}╠════════════════════════════════════════════════════════════╣${NC}"
+    echo -e "${PURPLE}║${NC} [1] List users                                             ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} [2] Check configuration (Show QR/Text)                     ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} [3] Edit configuration                                     ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} ${RED}[4] Remove user (Delete)${NC}                                   ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} [0] Back to Main Menu                                      ${PURPLE}║${NC}"
+    echo -e "${PURPLE}╚════════════════════════════════════════════════════════════╝${NC}"
     echo -en "${GREEN}Option: ${NC}"
     read -r opt
     case "$opt" in

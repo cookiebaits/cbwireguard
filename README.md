@@ -19,9 +19,8 @@ This wrapper dynamically pulls the latest scripts from GitHub, ensuring your ser
 
 ## 🚀 Key Feature Upgrades
 
-- **Enhanced Stealth & Bypassing:** Dynamically configure MTU, DNS, and AllowedIPs (split-tunneling) to bypass streaming service detection and restrictive firewalls.
-- **Integrated Cloak Plugin:** One-click installation of Cloak + Shadowsocks for a powerful secondary stealth layer.
-- **Domain-Based Split Tunneling:** Bypass specific domains from the VPN tunnel in real-time.
+- **Domain-Based Split Tunneling & Streaming Unblocking:** Bypass specific domains from the VPN tunnel in real-time, with built-in one-click support for major streaming services (Netflix, Hulu, Disney+, HBO Max, etc.) so you can watch without VPN blocks.
+- **WireGuard over TLS (wstunnel):** Stealth mode option to obfuscate WireGuard UDP traffic inside a TLS/WebSocket tunnel (TCP), effortlessly bypassing deep packet inspection (DPI) and strict firewalls.
 - **Maximized Throughput:** Injects Kernel-level BBR (Bottleneck Bandwidth and RTT) and FQ queueing, paired with an optimized default MTU (1280) to eliminate packet fragmentation and maximize speeds.
 - **Zero-Downtime Hot Reloading:** Adding a new peer instantly injects them into the live server. Existing users are never disconnected when the configuration updates.
 - **Military-Grade Security:** Enforces strict execution rules (`set -euo pipefail`), root-only directory locks (`chmod 700`), and secure unprivileged port generation.
@@ -48,7 +47,9 @@ WireGuard VPN Port: Enter a custom port (1024-65535) or leave it blank to let th
 
 SSH Port: Enter your custom SSH port (or leave blank for the default 22) so the firewall doesn't lock you out.
 
-Note: The script will automatically install dependencies, generate locked-down encryption keys, optimize your IP forwarding, and boot the server. (Internal IP scope: 10.18.0.x/24).
+wstunnel Port (Optional): If enabled, you can specify the TCP port used to encapsulate your WireGuard traffic (default: 443).
+
+Note: The script will automatically install dependencies, generate locked-down encryption keys, optimize your IP forwarding, configure UFW, and boot the server. (Internal IP scope: 10.18.0.x/24).
 
 ## 📱 Step 3: Adding a New Client (Option 2)
 Create a new peer instantly:
@@ -75,16 +76,13 @@ List: Shows all backups currently sitting in your directory and their file sizes
 
 Delete: Securely destroys backup archives to keep your server secure.
 
-## 🕵️ Step 6: Cloak Stealth Plugin (Option 6)
-Integrate Cloak with Shadowsocks-Rust to provide an additional layer of obfuscation. This tunnels your VPN traffic inside what appears to be standard HTTPS traffic, making it nearly impossible to detect via Deep Packet Inspection (DPI).
-
-## ⚙️ Step 7: Customizing Defaults (Option s)
+## ⚙️ Step 6: Customizing Defaults (Option s)
 You can now customize global defaults for all future clients:
 - **Default MTU:** Request specifically set to 1280 to bypass MTU-based detection.
 - **Default DNS:** Set to a high-privacy, ad-blocking DNS cluster.
-- **Default Allowed IPs:** Configured as `0.0.0.0/1, 128.0.0.0/1` by default to increase stealth.
+- **Default Allowed IPs:** Configured as `0.0.0.0/1, 128.0.0.0/1` by default.
 
-## 🗑️ Step 8: Removing the Server (Option r)
+## 🗑️ Step 7: Removing the Server (Option r)
 If you need to start fresh or remove the VPN, this option executes a total system wipe.
 
 Safely stops the systemd service.

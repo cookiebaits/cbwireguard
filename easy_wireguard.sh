@@ -39,6 +39,13 @@ if [[ "$EUID" -ne 0 ]]; then
     exit 1
 fi
 
+init_environment() {
+    if [[ ! -d "$INSTALL_DIR" ]]; then
+        mkdir -p "$INSTALL_DIR"
+    fi
+    chmod 700 "$INSTALL_DIR" 
+}
+
 fetch_and_run() {
     local script_name="$1"
     local script_path="./${script_name}"
@@ -72,19 +79,20 @@ update_setting() {
 }
 
 display_menu() {
-    echo -en "\n${GREEN}Choose the action:
-[1] Setup WireGuard server
-[2] Add new client (peer)
-[3] Show client (peer) QR
-[4] Configure clients (Check/Edit/Remove)
-[5] Backup & Restore Manager
-[6] Domain-Based Split Tunneling
-[7] Install/Manage Xray (Stealth Plugin)
-[s] Settings (MTU, DNS, AllowedIPs)
-${RED}[r] Remove WireGuard server from this system${GREEN}
-[q] Exit
-
-Option: ${NC}"
+    echo -e "\n${PURPLE}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${PURPLE}║${NC} ${GREEN}Choose the action:${NC}                                         ${PURPLE}║${NC}"
+    echo -e "${PURPLE}╠════════════════════════════════════════════════════════════╣${NC}"
+    echo -e "${PURPLE}║${NC} [1] Setup WireGuard server                                 ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} [2] Add new client (peer)                                  ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} [3] Show client (peer) QR                                  ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} [4] Configure clients (Check/Edit/Remove)                  ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} [5] Backup & Restore Manager                               ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} [6] Domain-Based Split Tunneling                           ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} [s] Settings (MTU, DNS, AllowedIPs)                        ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} ${RED}[r] Remove WireGuard server from this system${NC}               ${PURPLE}║${NC}"
+    echo -e "${PURPLE}║${NC} [q] Exit                                                   ${PURPLE}║${NC}"
+    echo -e "${PURPLE}╚════════════════════════════════════════════════════════════╝${NC}"
+    echo -en "${GREEN}Option: ${NC}"
 }
 
 settings_menu() {
@@ -118,12 +126,6 @@ settings_menu() {
                 ;;
             b) break ;;
         esac
-
-        if [[ "$OPTION" != "q" ]]; then
-            echo -en "
-${GREEN}Press Enter to return to the main menu...${NC}"
-            read -r
-        fi
     done
 }
 
@@ -153,7 +155,6 @@ main() {
             4) fetch_and_run "user_manager.sh" ;;
             5) fetch_and_run "backup_manager.sh" ;;
             6) fetch_and_run "domain_bypass.sh" ;;
-            7) fetch_and_run "Xray-Installer.sh" ;;
             s) settings_menu ;;
             r)
                 fetch_and_run "remove_server.sh"

@@ -13,10 +13,10 @@ if [[ "$EUID" -ne 0 ]]; then
     exit 1
 fi
 
-echo -e "${RED}================================================================${NC}"
-echo -e "${RED}WARNING: This will completely REMOVE WireGuard from this system!${NC}"
-echo -e "${RED}All configurations, keys, and client access will be destroyed.${NC}"
-echo -e "${RED}================================================================${NC}"
+echo -e "\n${RED}╔════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${RED}║ WARNING: This will completely REMOVE WireGuard!            ║${NC}"
+echo -e "${RED}║ All configurations, keys, and client access will be gone.  ║${NC}"
+echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
 echo -en "${PURPLE}Are you absolutely sure you want to proceed? [y/N]: ${NC}"
 read -r FLAG
 
@@ -29,6 +29,15 @@ if [[ "$FLAG" =~ ^[Yy]$ ]]; then
         echo -e "${GREEN}Stopping WireGuard service...${NC}"
         systemctl stop wg-quick@wg0.service
         systemctl disable wg-quick@wg0.service
+    fi
+
+    if systemctl is-active --quiet wstunnel.service; then
+        echo -e "${GREEN}Stopping wstunnel service...${NC}"
+        systemctl stop wstunnel.service
+        systemctl disable wstunnel.service
+        rm -f /etc/systemd/system/wstunnel.service
+        systemctl daemon-reload
+        rm -f /usr/local/bin/wstunnel
     fi
 
     # 2. Revert the IP forwarding vulnerability
