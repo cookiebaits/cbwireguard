@@ -28,6 +28,22 @@ check_port_usage() {
     return 1 # Port is free
 }
 
+show_spinner() {
+    local pid=$1
+    local delay=0.1
+    local spinstr='|/-\'
+    while kill -0 "$pid" 2>/dev/null; do
+        local temp=${spinstr#?}
+        printf " [%c]  " "$spinstr"
+        local spinstr=$temp${spinstr%"$temp"}
+        sleep $delay
+        printf "\b\b\b\b\b\b"
+    done
+    printf "      \b\b\b\b\b\b"
+    wait "$pid"
+    return $?
+}
+
 echo -e "\n${PURPLE}╔════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${PURPLE}║${NC} ${GREEN}Choose port for VPN:${NC}                                       ${PURPLE}║${NC}"
 echo -e "${PURPLE}╠════════════════════════════════════════════════════════════╣${NC}"
@@ -119,16 +135,37 @@ fi
 SERVER_PRIVATE_IP="10.18.0.1"
 SERVER_SUBNET="10.18.0.0/24"
 
-echo -e "${GREEN}Installing dependencies (this may take a moment)...${NC}"
-apt-get update -yqq >/dev/null 2>&1 || true
-apt-get install -yqq ufw dnsutils qrencode iptables iproute2 jq bc >/dev/null 2>&1 || true
+# Check if base packages are installed
+if ! dpkg -s ufw dnsutils qrencode iptables iproute2 jq bc >/dev/null 2>&1; then
+    echo -en "${GREEN}Installing base dependencies (this may take a moment)...${NC}"
+    (
+        apt-get update -yqq >/dev/null 2>&1 || true
+        apt-get install -yqq ufw dnsutils qrencode iptables iproute2 jq bc >/dev/null 2>&1 || true
+    ) &
+    show_spinner $!
+    echo -e "${GREEN}Done!${NC}"
+fi
 
 if [[ "$WG_TYPE" == "amnezia" ]]; then
-    add-apt-repository -y ppa:amnezia/ppa >/dev/null 2>&1 || true
-    apt-get update -yqq >/dev/null 2>&1 || true
-    apt-get install -yqq amneziawg-tools amneziawg-dkms >/dev/null 2>&1 || true
+    if ! dpkg -s amneziawg-tools amneziawg-dkms >/dev/null 2>&1; then
+        echo -en "${GREEN}Installing AmneziaWG packages (this may take a moment)...${NC}"
+        (
+            add-apt-repository -y ppa:amnezia/ppa >/dev/null 2>&1 || true
+            apt-get update -yqq >/dev/null 2>&1 || true
+            apt-get install -yqq amneziawg-tools amneziawg-dkms >/dev/null 2>&1 || true
+        ) &
+        show_spinner $!
+        echo -e "${GREEN}Done!${NC}"
+    fi
 else
-    apt-get install -yqq wireguard >/dev/null 2>&1 || true
+    if ! dpkg -s wireguard >/dev/null 2>&1; then
+        echo -en "${GREEN}Installing WireGuard package (this may take a moment)...${NC}"
+        (
+            apt-get install -yqq wireguard >/dev/null 2>&1 || true
+        ) &
+        show_spinner $!
+        echo -e "${GREEN}Done!${NC}"
+    fi
 fi
 
 echo -e "${GREEN}Generating secure encryption keys...${NC}"

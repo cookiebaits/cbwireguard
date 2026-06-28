@@ -20,6 +20,22 @@ echo -e "${RED}╚════════════════════�
 echo -en "${PURPLE}Are you absolutely sure you want to proceed? [y/N]: ${NC}"
 read -r FLAG
 
+show_spinner() {
+    local pid=$1
+    local delay=0.1
+    local spinstr='|/-\'
+    while kill -0 "$pid" 2>/dev/null; do
+        local temp=${spinstr#?}
+        printf " [%c]  " "$spinstr"
+        local spinstr=$temp${spinstr%"$temp"}
+        sleep $delay
+        printf "\b\b\b\b\b\b"
+    done
+    printf "      \b\b\b\b\b\b"
+    wait "$pid"
+    return $?
+}
+
 # Default to "No" for safety. Only proceed if user explicitly types y or Y.
 if [[ "$FLAG" =~ ^[Yy]$ ]]; then
     echo -e "${GREEN}Starting removal process...${NC}"
@@ -44,11 +60,17 @@ if [[ "$FLAG" =~ ^[Yy]$ ]]; then
     sysctl -p &> /dev/null
 
     # 3. Completely wipe the packages
-    echo -e "${GREEN}Uninstalling VPN packages (this may take a moment)...${NC}"
-    # Purge destroys the app configurations; autoremove cleans up unused dependencies
-    apt-get purge -yqq wireguard wireguard-tools amneziawg-tools amneziawg-dkms >/dev/null 2>&1 || true
-    add-apt-repository --remove -y ppa:amnezia/ppa >/dev/null 2>&1 || true
-    apt-get autoremove -yqq >/dev/null 2>&1 || true
+    echo -en "${GREEN}Uninstalling VPN packages (this may take a moment)...${NC}"
+    (
+        # Purge destroys the app configurations; autoremove cleans up unused dependencies
+        apt-get purge -yqq wireguard wireguard-tools amneziawg-tools amneziawg-dkms >/dev/null 2>&1 || true
+        if grep -q "amnezia" /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null; then
+            add-apt-repository --remove -y ppa:amnezia/ppa >/dev/null 2>&1 || true
+        fi
+        apt-get autoremove -yqq >/dev/null 2>&1 || true
+    ) &
+    show_spinner $!
+    echo -e "${GREEN}Done!${NC}"
 
     # 4. Destroy the sensitive keys and configuration directory
     echo -e "${GREEN}Deleting keys and config directories...${NC}"
