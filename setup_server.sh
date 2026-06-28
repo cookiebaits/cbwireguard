@@ -1,14 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-# P1: OS Detection to fix unbound 'distro' variable
-if [[ -f /etc/os-release ]]; then
-    source /etc/os-release
-    distro=$ID
-else
-    distro="unknown"
-fi
-
 GREEN='\033[0;32m'
 PURPLE='\033[0;35m'
 RED='\033[0;31m'
@@ -39,24 +31,28 @@ check_port_usage() {
 echo -e "\n${PURPLE}╔════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${PURPLE}║${NC} ${GREEN}Choose port for VPN:${NC}                                       ${PURPLE}║${NC}"
 echo -e "${PURPLE}╠════════════════════════════════════════════════════════════╣${NC}"
-echo -e "${PURPLE}║${NC} [1] 443                                                    ${PURPLE}║${NC}"
-echo -e "${PURPLE}║${NC} [2] 53 (DNS)                                               ${PURPLE}║${NC}"
-echo -e "${PURPLE}║${NC} [3] 123 (NTP)                                              ${PURPLE}║${NC}"
-echo -e "${PURPLE}║${NC} [4] 1194 (OpenVPN UDP)                                     ${PURPLE}║${NC}"
-echo -e "${PURPLE}║${NC} [5] 500 (ISAKMP)                                           ${PURPLE}║${NC}"
-echo -e "${PURPLE}║${NC} [6] 4500 (IPsec NAT-T)                                     ${PURPLE}║${NC}"
+echo -e "${PURPLE}║${NC} [1] 443 (HTTPS/TLS Default)                                ${PURPLE}║${NC}"
+echo -e "${PURPLE}║${NC} [2] 8443 (HTTPS Alt)                                       ${PURPLE}║${NC}"
+echo -e "${PURPLE}║${NC} [3] 8080 (HTTP Alt)                                        ${PURPLE}║${NC}"
+echo -e "${PURPLE}║${NC} [4] 53 (DNS)                                               ${PURPLE}║${NC}"
+echo -e "${PURPLE}║${NC} [5] 123 (NTP)                                              ${PURPLE}║${NC}"
+echo -e "${PURPLE}║${NC} [6] 1194 (OpenVPN UDP)                                     ${PURPLE}║${NC}"
+echo -e "${PURPLE}║${NC} [7] 500 (ISAKMP)                                           ${PURPLE}║${NC}"
+echo -e "${PURPLE}║${NC} [8] 4500 (IPsec NAT-T)                                     ${PURPLE}║${NC}"
 echo -e "${PURPLE}╚════════════════════════════════════════════════════════════╝${NC}"
-echo -en "${PURPLE}Select option [1-6] or enter custom port [Default 443]: ${NC}"
+echo -en "${PURPLE}Select option [1-8] or enter custom port [Default 443]: ${NC}"
 read -r input_VPN_PORT
 
 while true; do
     case "$input_VPN_PORT" in
         1) PORT="443" ;;
-        2) PORT="53" ;;
-        3) PORT="123" ;;
-        4) PORT="1194" ;;
-        5) PORT="500" ;;
-        6) PORT="4500" ;;
+        2) PORT="8443" ;;
+        3) PORT="8080" ;;
+        4) PORT="53" ;;
+        5) PORT="123" ;;
+        6) PORT="1194" ;;
+        7) PORT="500" ;;
+        8) PORT="4500" ;;
     "") PORT="443" ;;
         *)
             if [[ "$input_VPN_PORT" =~ ^[0-9]+$ ]]; then
@@ -123,19 +119,16 @@ fi
 SERVER_PRIVATE_IP="10.18.0.1"
 SERVER_SUBNET="10.18.0.0/24"
 
-echo -e "${GREEN}Installing dependencies...${NC}"
-apt-get update -y
-apt-get install -y ufw dnsutils qrencode iptables iproute2 jq bc
+echo -e "${GREEN}Installing dependencies (this may take a moment)...${NC}"
+apt-get update -yqq >/dev/null 2>&1 || true
+apt-get install -yqq ufw dnsutils qrencode iptables iproute2 jq bc >/dev/null 2>&1 || true
 
 if [[ "$WG_TYPE" == "amnezia" ]]; then
-    echo -e "${GREEN}Installing AmneziaWG...${NC}"
-    # Suppress output of add-apt-repository
     add-apt-repository -y ppa:amnezia/ppa >/dev/null 2>&1 || true
-    apt-get update -y >/dev/null 2>&1
-    apt-get install -y amneziawg-tools amneziawg-dkms
+    apt-get update -yqq >/dev/null 2>&1 || true
+    apt-get install -yqq amneziawg-tools amneziawg-dkms >/dev/null 2>&1 || true
 else
-    echo -e "${GREEN}Installing Standard WireGuard...${NC}"
-    apt-get install -y wireguard
+    apt-get install -yqq wireguard >/dev/null 2>&1 || true
 fi
 
 echo -e "${GREEN}Generating secure encryption keys...${NC}"

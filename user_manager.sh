@@ -121,7 +121,7 @@ delete_user() {
         
         local privkey pubkey
         privkey=$(echo "$content" | grep "^PrivateKey" | awk '{print $3}')
-        pubkey=$(echo "$privkey" | wg pubkey)
+        pubkey=$(echo "$privkey" | $WG_CMD pubkey)
         
         if [[ -n "$pubkey" ]]; then
             echo -e "${GREEN}Removing peer from live VPN...${NC}"

@@ -44,11 +44,11 @@ if [[ "$FLAG" =~ ^[Yy]$ ]]; then
     sysctl -p &> /dev/null
 
     # 3. Completely wipe the packages
-    echo -e "${GREEN}Uninstalling VPN packages...${NC}"
+    echo -e "${GREEN}Uninstalling VPN packages (this may take a moment)...${NC}"
     # Purge destroys the app configurations; autoremove cleans up unused dependencies
-    apt-get purge -y wireguard wireguard-tools amneziawg-tools amneziawg-dkms || true
+    apt-get purge -yqq wireguard wireguard-tools amneziawg-tools amneziawg-dkms >/dev/null 2>&1 || true
     add-apt-repository --remove -y ppa:amnezia/ppa >/dev/null 2>&1 || true
-    apt-get autoremove -y
+    apt-get autoremove -yqq >/dev/null 2>&1 || true
 
     # 4. Destroy the sensitive keys and configuration directory
     echo -e "${GREEN}Deleting keys and config directories...${NC}"
