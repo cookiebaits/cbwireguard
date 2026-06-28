@@ -79,20 +79,18 @@ update_setting() {
 }
 
 display_menu() {
-    echo -e "\n${PURPLE}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║${NC} ${GREEN}Choose the action:${NC}                                         ${PURPLE}║${NC}"
-    echo -e "${PURPLE}╠════════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${PURPLE}║${NC} [1] Setup WireGuard server                                 ${PURPLE}║${NC}"
-    echo -e "${PURPLE}║${NC} [2] Add new client (peer)                                  ${PURPLE}║${NC}"
-    echo -e "${PURPLE}║${NC} [3] Show client (peer) QR                                  ${PURPLE}║${NC}"
-    echo -e "${PURPLE}║${NC} [4] Configure clients (Check/Edit/Remove)                  ${PURPLE}║${NC}"
-    echo -e "${PURPLE}║${NC} [5] Backup & Restore Manager                               ${PURPLE}║${NC}"
-    echo -e "${PURPLE}║${NC} [6] Domain-Based Split Tunneling                           ${PURPLE}║${NC}"
-    echo -e "${PURPLE}║${NC} [s] Settings (MTU, DNS, AllowedIPs)                        ${PURPLE}║${NC}"
-    echo -e "${PURPLE}║${NC} ${RED}[r] Remove WireGuard server from this system${NC}               ${PURPLE}║${NC}"
-    echo -e "${PURPLE}║${NC} [q] Exit                                                   ${PURPLE}║${NC}"
-    echo -e "${PURPLE}╚════════════════════════════════════════════════════════════╝${NC}"
-    echo -en "${GREEN}Option: ${NC}"
+    echo -en "\n${GREEN}Choose the action:
+[1] Setup WireGuard server
+[2] Add new client (peer)
+[3] Show client (peer) QR
+[4] Configure clients (Check/Edit/Remove)
+[5] Backup & Restore Manager
+[6] Domain-Based Split Tunneling
+[s] Settings (MTU, DNS, AllowedIPs)
+${RED}[r] Remove WireGuard server from this system${GREEN}
+[q] Exit
+
+Option: ${NC}"
 }
 
 settings_menu() {

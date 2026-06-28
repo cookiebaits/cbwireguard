@@ -13,10 +13,10 @@ if [[ "$EUID" -ne 0 ]]; then
     exit 1
 fi
 
-echo -e "\n${RED}╔════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${RED}║ WARNING: This will completely REMOVE WireGuard!            ║${NC}"
-echo -e "${RED}║ All configurations, keys, and client access will be gone.  ║${NC}"
-echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
+echo -e "${RED}================================================================${NC}"
+echo -e "${RED}WARNING: This will completely REMOVE WireGuard from this system!${NC}"
+echo -e "${RED}All configurations, keys, and client access will be destroyed.${NC}"
+echo -e "${RED}================================================================${NC}"
 echo -en "${PURPLE}Are you absolutely sure you want to proceed? [y/N]: ${NC}"
 read -r FLAG
 
@@ -31,12 +31,6 @@ if [[ "$FLAG" =~ ^[Yy]$ ]]; then
         systemctl disable wg-quick@wg0.service
     fi
 
-    if systemctl is-active --quiet awg-quick@awg0.service; then
-        echo -e "${GREEN}Stopping AmneziaWG service...${NC}"
-        systemctl stop awg-quick@awg0.service
-        systemctl disable awg-quick@awg0.service
-    fi
-
     # 2. Revert the IP forwarding vulnerability
     echo -e "${GREEN}Reverting IP forwarding settings...${NC}"
     sed -i '/net.ipv4.ip_forward=1/d' /etc/sysctl.conf
@@ -44,16 +38,14 @@ if [[ "$FLAG" =~ ^[Yy]$ ]]; then
     sysctl -p &> /dev/null
 
     # 3. Completely wipe the packages
-    echo -e "${GREEN}Uninstalling VPN packages (this may take a moment)...${NC}"
+    echo -e "${GREEN}Uninstalling WireGuard...${NC}"
     # Purge destroys the app configurations; autoremove cleans up unused dependencies
-    apt-get purge -yqq wireguard wireguard-tools amneziawg-tools amneziawg-dkms >/dev/null 2>&1 || true
-    add-apt-repository --remove -y ppa:amnezia/ppa >/dev/null 2>&1 || true
-    apt-get autoremove -yqq >/dev/null 2>&1 || true
+    apt-get purge -y wireguard wireguard-tools
+    apt-get autoremove -y
 
     # 4. Destroy the sensitive keys and configuration directory
-    echo -e "${GREEN}Deleting keys and config directories...${NC}"
+    echo -e "${GREEN}Deleting WireGuard keys and config directories...${NC}"
     rm -rf /etc/wireguard
-    rm -rf /etc/amnezia
 
     echo -e "${PURPLE}Done! WireGuard has been completely removed from this system.${NC}"
 else
