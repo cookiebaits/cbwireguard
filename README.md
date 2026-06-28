@@ -1,89 +1,113 @@
-# 🍪 Cookie's Easy WireGuard Server
+# Go Implementation of AmneziaWG
 
-> A heavily optimized, hyper-secure, and lightning-fast deployment script to configure and manage a WireGuard VPN server on Ubuntu.
+AmneziaWG is a contemporary version of the WireGuard protocol. It's a fork of WireGuard-Go and offers protection against detection by Deep Packet Inspection (DPI) systems. At the same time, it retains the simplified architecture and high performance of the original.
 
-This wrapper dynamically pulls the latest scripts from GitHub, ensuring your server is always running the most up-to-date and secure code. Guaranteed to work on **Ubuntu 20.04 and newer**.
+The precursor, WireGuard, is known for its efficiency but had issues with detection due to its distinctive packet signatures.
+AmneziaWG addresses this problem by employing advanced obfuscation methods, allowing its traffic to blend seamlessly with regular internet traffic.
+As a result, AmneziaWG maintains high performance while adding an extra layer of stealth, making it a superb choice for those seeking a fast and discreet VPN connection.
 
----
+## Usage
 
-## 📑 Table of Contents
-- [Key Feature Upgrades](#-key-feature-upgrades)
-- [Installation (Step 1)](#%EF%B8%8F-installation-step-1)
-- [Setting up the Server (Option 1)](#%E2%9A%99%EF%B8%8F-setting-up-the-server-option-1)
-- [Adding a New Client (Option 2)](#-adding-a-new-client-option-2)
-- [Managing Clients (Options 3 & 4)](#-managing-clients-options-3--4)
-- [Backup & Restore Manager (Option 5)](#-backup--restore-manager-option-5)
-- [Removing the Server (Option 6)](#%EF%B8%8F-removing-the-server-option-6)
+Simply run:
 
----
-
-## 🚀 Key Feature Upgrades
-
-- **Domain-Based Split Tunneling:** Bypass specific domains from the VPN tunnel in real-time.
-- **Maximized Throughput:** Injects Kernel-level BBR (Bottleneck Bandwidth and RTT) and FQ queueing, paired with an optimized default MTU (1280) to eliminate packet fragmentation and maximize speeds.
-- **Zero-Downtime Hot Reloading:** Adding a new peer instantly injects them into the live server. Existing users are never disconnected when the configuration updates.
-- **Military-Grade Security:** Enforces strict execution rules (`set -euo pipefail`), root-only directory locks (`chmod 700`), and secure unprivileged port generation.
-- **Encrypted Backups:** All backups are now AES-256 encrypted using OpenSSL.
-- **Smart IP Tracking:** Intelligently scans the server to dynamically assign IP addresses, preventing crashes from corrupted or empty lines.
-- **Unified Backup Manager:** Securely create, list, restore, and destroy server backups from a single interactive menu.
-
----
-
-## 🚀 Quick Installation
-
-Run this single command to download and launch the installer:
-
-```bash
-curl -sSfL https://raw.githubusercontent.com/cookiebaits/cbwireguard/main/easy_wireguard.sh -o easy_wireguard.sh && chmod +x easy_wireguard.sh && sudo ./easy_wireguard.sh
+```
+$ amneziawg-go wg0
 ```
 
----
+This will create an interface and fork into the background. To remove the interface, use the usual `ip link del wg0`, or if your system does not support removing interfaces directly, you may instead remove the control socket via `rm -f /var/run/amneziawg/wg0.sock`, which will result in amneziawg-go shutting down.
 
-## ⚙️ Step 2: Setting up the Server (Option 1)
-The script will ask you to define your ports:
+To run amneziawg-go without forking to the background, pass `-f` or `--foreground`:
 
-WireGuard VPN Port: Enter a custom port (1024-65535) or leave it blank to let the script generate a secure, randomized high port.
+```
+$ amneziawg-go -f wg0
+```
+When an interface is running, you may use [`amneziawg-tools `](https://github.com/amnezia-vpn/amneziawg-tools) to configure it, as well as the usual `ip(8)` and `ifconfig(8)` commands.
 
-SSH Port: Enter your custom SSH port (or leave blank for the default 22) so the firewall doesn't lock you out.
+To run with more logging you may set the environment variable `LOG_LEVEL=debug`.
 
-Note: The script will automatically install dependencies, generate locked-down encryption keys, optimize your IP forwarding, and boot the server. (Internal IP scope: 10.18.0.x/24).
+## Platforms
 
-## 📱 Step 3: Adding a New Client (Option 2)
-Create a new peer instantly:
+### Linux
 
-Enter a device name (alphanumeric characters only).
+This will run on Linux; you should run amnezia-wg instead of using default linux kernel module.
 
-Choose if you want the output rendered as a QR code or printed as raw text.
+### macOS
 
-The script will generate the .conf file and inject the user into the active server without restarting the interface. If you chose QR output, scan the terminal with the WireGuard mobile app.
+This runs on macOS using the utun driver. It does not yet support sticky sockets, and won't support fwmarks because of Darwin limitations. Since the utun driver cannot have arbitrary interface names, you must either use `utun[0-9]+` for an explicit interface name or `utun` to have the kernel select one for you. If you choose `utun` as the interface name, and the environment variable `WG_TUN_NAME_FILE` is defined, then the actual name of the interface chosen by the kernel is written to the file specified by that variable.
+This runs on MacOS, you should use it from [amneziawg-apple](https://github.com/amnezia-vpn/amneziawg-apple)
 
-## 🔍 Step 4: Managing Clients (Options 3 & 4)
-[3] Show Client QR: Enter the exact name of a previously created device. The script will instantly render a high-fidelity (ansiutf8) QR code in your terminal.
+### Windows
 
-[4] List Configured Clients: Prints a clean list of every active peer currently configured on your server so you don't have to guess their names.
+This runs on Windows, you should use it from [amneziawg-windows](https://github.com/amnezia-vpn/amneziawg-windows), which uses this as a module.
 
-## 💾 Step 5: Backup & Restore Manager (Option 5)
-Selecting this opens the dedicated Backup Sub-Menu:
 
-Create: Archives your current /etc/wireguard configurations into an **AES-256 encrypted** (chmod 600) .tar.gz.enc file.
+## Building
 
-Restore: Scans the directory for existing backups, prompts for the password, and restores the configuration.
+This requires an installation of the latest version of [Go](https://go.dev/).
 
-List: Shows all backups currently sitting in your directory and their file sizes.
+```
+$ git clone https://github.com/amnezia-vpn/amneziawg-go
+$ cd amneziawg-go
+$ make
+```
 
-Delete: Securely destroys backup archives to keep your server secure.
+## Configuration
 
-## ⚙️ Step 6: Customizing Defaults (Option s)
-You can now customize global defaults for all future clients:
-- **Default MTU:** Request specifically set to 1280 to bypass MTU-based detection.
-- **Default DNS:** Set to a high-privacy, ad-blocking DNS cluster.
-- **Default Allowed IPs:** Configured as `0.0.0.0/1, 128.0.0.0/1` by default.
+> [!NOTE]
+> If there is no value specified (for any param), AWG treats it as 0
 
-## 🗑️ Step 7: Removing the Server (Option r)
-If you need to start fresh or remove the VPN, this option executes a total system wipe.
+### Junk packets
 
-Safely stops the systemd service.
+The amount of junk packets specified in `Jc` with a random size between `Jmin` and `Jmax` would be generated and sent prior every handshake
 
-Reverts the sysctl IP forwarding changes to close system vulnerabilities.
+- `Jc: int`, recommended range is 4-12
+- `Jmin: int` <= `Jmax:int`
 
-Purges WireGuard and cleans up unused dependencies.
+> [!TIP]
+> Junk packets do not carry any actual data, so there is no need to specify it on both sides. General recommendation is to use it on the client side only
+
+> [!IMPORTANT]
+> If Jmax >= system MTU (not the one specified in AWG), then the system can fracture this packet into fragments, which looks suspicious from the censor side
+
+### Message paddings
+
+- `S1: int` - padding of handshake initial message
+- `S2: int` - padding of handshake response message
+- `S3: int` - padding of handshake cookie message
+- `S4: int` - padding of transport messages
+
+### Message headers
+
+Every message in wireguard has `uint32` type at the beginning of the packet. This field could be controlled by specifying the params below:
+
+- `H1: string` - header range of handshake initial message
+- `H2: string` - header range of handshake response message
+- `H3: string` - header range of handshake cookie message
+- `H4: string` - header range of transport message
+
+Values could be specified as:
+- range: `x-y`, x <= y; e.g. `123-456`
+- single value `1234`
+
+### Custom signature packets
+
+These packets are being send prior to every handshake, in the same way as Junk packets do. The sending order is `I1`, `I2`, `I3`, `I4`, `I5`. If there is no value specified, the packet is skipped.
+
+- `I1: string`
+- `I2: string`
+- `I3: string`
+- `I4: string`
+- `I5: string`
+
+Value is a sequence of tags specified below:
+- `<b 0x[seq]>` - static bytes tag. Dumps `[seq]` as-is to the packet. `[seq]` is hex-encoded sequence which represents bytes sequence (2 hex numbers per byte) and is always even-sized
+- `<r [size]>` - random bytes tag. Dumps `[size]` amount of randomly-generated bytes to the packet
+- `<rd [size]>` - random digits tag. Dumps `[size]` amount of randomly-generated bytes from `[0-9]` set to the packet
+- `<rc [size]>` - random chars tag. Dumps `[size]` amount of randomly-generated bytes from `[a-zA-Z] set to the packet
+- `<t>` - timestamp tag. Dumps 4-bytes long current system time in UNIX format
+
+> [!TIP]
+> Custom signature packets does not carry any actual data, so there is no need to specify it on both sides. General recommendation is to use it on the client side only
+
+> [!IMPORTANT]
+> If the final size of any packet exceeds system MTU, it would be fractured into fragments, which looks suspicious
