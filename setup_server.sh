@@ -118,7 +118,6 @@ SERVER_PRIVATE_IP="10.18.0.1"
 SERVER_SUBNET="10.18.0.0/24"
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
-apt-get update -y
 apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq bc
 
 echo -e "${GREEN}Generating secure encryption keys...${NC}"
