@@ -123,12 +123,83 @@ else
 fi
 
 if [[ "${WSTUNNEL_ENABLED:-false}" == "true" ]]; then
-    echo -e "\n${GREEN}=== Stealth Mode (WStunnel) Instructions ===${NC}"
-    echo -e "${PURPLE}To bypass DPI and streaming site blocks, you can connect via WStunnel.${NC}"
-    echo -e "${PURPLE}Run this command on your local machine alongside WireGuard:${NC}"
-    echo -e "wstunnel client -L 'udp://${PORT}:127.0.0.1:${PORT}?timeout_sec=0' ws://${IP_ADR}:${WSTUNNEL_PORT}"
-    echo -e "${PURPLE}Then, change the 'Endpoint' in your WireGuard client config to: ${NC}127.0.0.1:${PORT}"
-    echo -e "${GREEN}============================================${NC}\n"
+    CLIENT_INSTALLER="/etc/wireguard/clients/${DEVICE_NAME}_installer.sh"
+    cat <<EOF > "$CLIENT_INSTALLER"
+#!/bin/bash
+set -euo pipefail
+
+# Check for root
+if [[ "\$EUID" -ne 0 ]]; then
+    echo "Please run this script as root (sudo)."
+    exit 1
+fi
+
+echo "Installing WireGuard..."
+apt-get update -y
+apt-get install -y wireguard resolvconf
+
+echo "Installing WStunnel..."
+WSTUNNEL_LATEST_VERSION=\$(curl -Ls -o /dev/null -w %{url_effective} https://github.com/erebe/wstunnel/releases/latest | grep -o '[^/]*$')
+WSTUNNEL_DL_URL="https://github.com/erebe/wstunnel/releases/download/\${WSTUNNEL_LATEST_VERSION}/wstunnel_\${WSTUNNEL_LATEST_VERSION#v}_linux_amd64.tar.gz"
+curl -sL "\$WSTUNNEL_DL_URL" -o /tmp/wstunnel.tar.gz
+tar -xzf /tmp/wstunnel.tar.gz -C /tmp
+mv /tmp/wstunnel /usr/local/bin/wstunnel
+chmod +x /usr/local/bin/wstunnel
+rm -f /tmp/wstunnel.tar.gz
+
+echo "Setting up WStunnel systemd service..."
+cat <<SVC > /etc/systemd/system/wstunnel-client.service
+[Unit]
+Description=WStunnel Client
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/wstunnel client -L 'udp://${PORT}:127.0.0.1:${PORT}?timeout_sec=0' ws://${IP_ADR}:${WSTUNNEL_PORT}
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+SVC
+
+systemctl daemon-reload
+systemctl enable wstunnel-client.service
+systemctl restart wstunnel-client.service
+
+echo "Setting up WireGuard client..."
+cat <<WGCONF > /etc/wireguard/${DEVICE_NAME}.conf
+[Interface]
+PrivateKey = $DEVICE_PRIVATE
+Address = $CLIENT_IP/32
+DNS = $DNS
+MTU = $MTU
+
+[Peer]
+PublicKey = $SERVER_PUBLIC
+Endpoint = 127.0.0.1:${PORT}
+AllowedIPs = $ALLOWED_IPS
+PersistentKeepalive = 25
+WGCONF
+
+chmod 600 /etc/wireguard/${DEVICE_NAME}.conf
+
+echo "Starting WireGuard client..."
+systemctl enable wg-quick@${DEVICE_NAME}.service
+systemctl restart wg-quick@${DEVICE_NAME}.service
+
+echo "Client setup complete! Connected to ${IP_ADR} via WStunnel."
+EOF
+    chmod +x "$CLIENT_INSTALLER"
+
+    echo -e "\n${GREEN}=== Stealth Mode (WStunnel) One-Tap Installer ===${NC}"
+    echo -e "${PURPLE}A one-tap client installer script has been generated at:${NC}"
+    echo -e "${GREEN}${CLIENT_INSTALLER}${NC}"
+    echo -e "${PURPLE}Transfer this script to your client machine (Ubuntu/Debian or other Linux distro) and run it as root:${NC}"
+    echo -e "  sudo ./${DEVICE_NAME}_installer.sh"
+    echo -e "${RED}Note: This script assumes a Debian/Ubuntu-based system for 'apt-get'. If using Windows or macOS, please install WireGuard and WStunnel manually using the original instructions.${NC}"
+    echo -e "${GREEN}=================================================${NC}\n"
 fi
 
 encrypt_config
