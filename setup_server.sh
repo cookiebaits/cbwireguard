@@ -165,13 +165,23 @@ ufw --force enable || true
 
 if [[ "$WSTUNNEL_ENABLED" == "true" ]]; then
     echo -e "${GREEN}Installing WStunnel...${NC}"
-    WSTUNNEL_LATEST_VERSION=$(curl -Ls -o /dev/null -w %{url_effective} https://github.com/erebe/wstunnel/releases/latest | grep -o '[^/]*$')
-    WSTUNNEL_DL_URL="https://github.com/erebe/wstunnel/releases/download/${WSTUNNEL_LATEST_VERSION}/wstunnel_${WSTUNNEL_LATEST_VERSION#v}_linux_amd64.tar.gz"
-    curl -sL "$WSTUNNEL_DL_URL" -o /tmp/wstunnel.tar.gz
-    tar -xzf /tmp/wstunnel.tar.gz -C /tmp
-    mv /tmp/wstunnel /usr/local/bin/wstunnel
+
+    # Use local binary if it exists (from WSTun or repo root)
+    if [[ -f "./wstunnel" ]]; then
+        cp ./wstunnel /usr/local/bin/wstunnel
+    elif [[ -f "./WSTun/wstunnel/target/release/wstunnel" ]]; then
+        cp ./WSTun/wstunnel/target/release/wstunnel /usr/local/bin/wstunnel
+    else
+        # Fallback to downloading if local binary is not found
+        WSTUNNEL_LATEST_VERSION=$(curl -Ls -o /dev/null -w %{url_effective} https://github.com/erebe/wstunnel/releases/latest | grep -o '[^/]*$')
+        WSTUNNEL_DL_URL="https://github.com/erebe/wstunnel/releases/download/${WSTUNNEL_LATEST_VERSION}/wstunnel_${WSTUNNEL_LATEST_VERSION#v}_linux_amd64.tar.gz"
+        curl -sL "$WSTUNNEL_DL_URL" -o /tmp/wstunnel.tar.gz
+        tar -xzf /tmp/wstunnel.tar.gz -C /tmp
+        mv /tmp/wstunnel /usr/local/bin/wstunnel
+        rm -f /tmp/wstunnel.tar.gz
+    fi
+
     chmod +x /usr/local/bin/wstunnel
-    rm -f /tmp/wstunnel.tar.gz
 
     cat <<EOF > /etc/systemd/system/wstunnel.service
 [Unit]
