@@ -31,16 +31,6 @@ if [[ "$FLAG" =~ ^[Yy]$ ]]; then
         systemctl disable wg-quick@wg0.service
     fi
 
-    # 1.b. Safely shut down WStunnel
-    if systemctl is-active --quiet wstunnel.service || systemctl is-enabled --quiet wstunnel.service 2>/dev/null; then
-        echo -e "${GREEN}Stopping WStunnel service...${NC}"
-        systemctl stop wstunnel.service || true
-        systemctl disable wstunnel.service || true
-        rm -f /etc/systemd/system/wstunnel.service
-        systemctl daemon-reload
-        rm -f /usr/local/bin/wstunnel
-    fi
-
     # 2. Revert the IP forwarding vulnerability
     echo -e "${GREEN}Reverting IP forwarding settings...${NC}"
     sed -i '/net.ipv4.ip_forward=1/d' /etc/sysctl.conf

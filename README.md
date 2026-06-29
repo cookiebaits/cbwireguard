@@ -20,7 +20,6 @@ This wrapper dynamically pulls the latest scripts from GitHub, ensuring your ser
 ## 🚀 Key Feature Upgrades
 
 - **Domain-Based Split Tunneling:** Bypass specific domains from the VPN tunnel in real-time.
-- **Stealth Mode (WStunnel):** Automatically configured out-of-the-box to encapsulate WireGuard traffic over WebSocket (TCP/443), perfectly unblocking streaming sites (Netflix, Hulu, etc.) and bypassing ISP DPI (Deep Packet Inspection).
 - **Maximized Throughput:** Injects Kernel-level BBR (Bottleneck Bandwidth and RTT) and FQ queueing, paired with an optimized default MTU (1280) to eliminate packet fragmentation and maximize speeds.
 - **Zero-Downtime Hot Reloading:** Adding a new peer instantly injects them into the live server. Existing users are never disconnected when the configuration updates.
 - **Military-Grade Security:** Enforces strict execution rules (`set -euo pipefail`), root-only directory locks (`chmod 700`), and secure unprivileged port generation.
@@ -57,8 +56,6 @@ Enter a device name (alphanumeric characters only).
 Choose if you want the output rendered as a QR code or printed as raw text.
 
 The script will generate the .conf file and inject the user into the active server without restarting the interface. If you chose QR output, scan the terminal with the WireGuard mobile app.
-
-*Note: The script also automatically outputs instructions for connecting via Stealth Mode (WStunnel) to bypass streaming blocks alongside your generated WireGuard config.*
 
 ## 🔍 Step 4: Managing Clients (Options 3 & 4)
 [3] Show Client QR: Enter the exact name of a previously created device. The script will instantly render a high-fidelity (ansiutf8) QR code in your terminal.

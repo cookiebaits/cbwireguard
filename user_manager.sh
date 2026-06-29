@@ -79,19 +79,6 @@ show_user() {
                 echo -e "${GREEN}QR Code:${NC}"
                 echo "$content" | qrencode -t ansiutf8
             fi
-
-            if [[ "${WSTUNNEL_ENABLED:-false}" == "true" ]]; then
-                # Extract port and ip from server config or assume from content
-                local IP_PORT
-                IP_PORT=$(echo "$content" | grep -i "^Endpoint" | awk '{print $3}' | awk -F: '{print $1}')
-                local PORT
-                PORT=$(grep -i "^ListenPort" /etc/wireguard/wg0.conf | awk '{print $3}' || echo "51820")
-                echo -e "\n${GREEN}=== Stealth Mode (WStunnel) Instructions ===${NC}"
-                echo -e "${PURPLE}Run this command on your local machine alongside WireGuard:${NC}"
-                echo -e "wstunnel client -L 'udp://${PORT}:127.0.0.1:${PORT}?timeout_sec=0' ws://${IP_PORT}:${WSTUNNEL_PORT}"
-                echo -e "${PURPLE}Then, change the 'Endpoint' in your WireGuard client config to: ${NC}127.0.0.1:${PORT}"
-                echo -e "${GREEN}============================================${NC}\n"
-            fi
         fi
     else
         echo -e "${RED}User not found.${NC}"
@@ -178,18 +165,6 @@ show_user_by_name() {
             if command -v qrencode &> /dev/null; then
                 echo -e "${GREEN}QR Code:${NC}"
                 echo "$content" | qrencode -t ansiutf8
-            fi
-
-            if [[ "${WSTUNNEL_ENABLED:-false}" == "true" ]]; then
-                local IP_PORT
-                IP_PORT=$(echo "$content" | grep -i "^Endpoint" | awk '{print $3}' | awk -F: '{print $1}')
-                local PORT
-                PORT=$(grep -i "^ListenPort" /etc/wireguard/wg0.conf | awk '{print $3}' || echo "51820")
-                echo -e "\n${GREEN}=== Stealth Mode (WStunnel) Instructions ===${NC}"
-                echo -e "${PURPLE}Run this command on your local machine alongside WireGuard:${NC}"
-                echo -e "wstunnel client -L 'udp://${PORT}:127.0.0.1:${PORT}?timeout_sec=0' ws://${IP_PORT}:${WSTUNNEL_PORT}"
-                echo -e "${PURPLE}Then, change the 'Endpoint' in your WireGuard client config to: ${NC}127.0.0.1:${PORT}"
-                echo -e "${GREEN}============================================${NC}\n"
             fi
         fi
     else
