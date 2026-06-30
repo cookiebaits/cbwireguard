@@ -156,7 +156,7 @@ After=network.target
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/local/bin/wstunnel client -L 'udp://${PORT}:127.0.0.1:${PORT}?timeout_sec=0' ws://${IP_ADR}:${WSTUNNEL_PORT}
+ExecStart=/usr/local/bin/wstunnel client -L 'udp://51820:127.0.0.1:${PORT}?timeout_sec=0' ws://${IP_ADR}:${WSTUNNEL_PORT}
 Restart=always
 RestartSec=3
 
@@ -178,10 +178,18 @@ MTU = $MTU
 
 [Peer]
 PublicKey = $SERVER_PUBLIC
-Endpoint = 127.0.0.1:${PORT}
-AllowedIPs = $ALLOWED_IPS
+Endpoint = 127.0.0.1:51820
+AllowedIPs = 0.0.0.0/0, ::/0
 PersistentKeepalive = 25
 WGCONF
+
+# Add default route for the client back to the server to avoid a routing loop when capturing all IPs
+echo "Adding a static route to avoid routing loops..."
+GW=\$(ip route get 8.8.8.8 | grep -Po '(?<=via )(\S+)') || true
+IFACE=\$(ip route get 8.8.8.8 | grep -Po '(?<=dev )(\S+)') || true
+if [[ -n "\$GW" && -n "\$IFACE" ]]; then
+    ip route add ${IP_ADR} via \$GW dev \$IFACE || true
+fi
 
 chmod 600 /etc/wireguard/${DEVICE_NAME}.conf
 
