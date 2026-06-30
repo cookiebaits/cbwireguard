@@ -43,7 +43,10 @@ echo "[3] 123 (NTP)"
 echo "[4] 1194 (OpenVPN UDP)"
 echo "[5] 500 (ISAKMP)"
 echo "[6] 4500 (IPsec NAT-T)"
-echo -en "${PURPLE}Select option [1-6] or enter custom port [Default 443]: ${NC}"
+echo "[7] 80 (HTTP)"
+echo "[8] 8080 (HTTP Alt)"
+echo "[9] 8443 (HTTPS Alt)"
+echo -en "${PURPLE}Select option [1-9] or enter custom port [Default 443]: ${NC}"
 read -r input_VPN_PORT
 
 while true; do
@@ -54,6 +57,9 @@ while true; do
         4) PORT="1194" ;;
         5) PORT="500" ;;
         6) PORT="4500" ;;
+        7) PORT="80" ;;
+        8) PORT="8080" ;;
+        9) PORT="8443" ;;
     "") PORT="443" ;;
         *)
             if [[ "$input_VPN_PORT" =~ ^[0-9]+$ ]]; then
