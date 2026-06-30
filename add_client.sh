@@ -6,7 +6,7 @@ PURPLE='\033[0;35m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-SETTINGS_FILE="settings.conf"
+SETTINGS_FILE="/root/easy_wireguard/settings.conf"
 if [[ -f "$SETTINGS_FILE" ]]; then
     # shellcheck source=/dev/null
     source "$SETTINGS_FILE"
@@ -21,6 +21,16 @@ if [[ "$EUID" -ne 0 ]]; then
     echo -e "${RED}Security Error: Please run this script as root (sudo).${NC}"
     exit 1
 fi
+
+
+get_master_pass() {
+    if [[ -z "${MASTER_PASS:-}" ]]; then
+        echo -en "${GREEN}Enter Master Password for Client Encryption/Decryption: ${NC}"
+        read -rs MASTER_PASS
+        echo
+        export MASTER_PASS
+    fi
+}
 
 if [[ ! -f "/etc/wireguard/wg0.conf" ]]; then
     echo -e "${RED}Error: Server configuration not found. Please run setup_server.sh first.${NC}"
@@ -77,6 +87,7 @@ MTU = $MTU
 PublicKey = $SERVER_PUBLIC
 Endpoint = $IP_PORT
 AllowedIPs = $ALLOWED_IPS
+PersistentKeepalive = 25
 EOF
 
 chmod 600 "$CLIENT_CONF"
@@ -84,12 +95,20 @@ chmod 600 "$CLIENT_CONF"
 cat <<EOF >> /etc/wireguard/wg0.conf
 
 [Peer]
-# $DEVICE_NAME
+# USER_START: $DEVICE_NAME
 PublicKey = $DEVICE_PUBLIC
 AllowedIPs = $CLIENT_IP/32
+# USER_END: $DEVICE_NAME
 EOF
 
 wg set wg0 peer "$DEVICE_PUBLIC" allowed-ips "$CLIENT_IP/32"
+
+# P3: Encryption of client config
+encrypt_config() {
+    get_master_pass
+    openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -pass "pass:$MASTER_PASS" -in "$CLIENT_CONF" -out "${CLIENT_CONF}.enc"
+    # Keep the plain text for the current display, then delete
+}
 
 if [[ "$IS_QRCODE" == "y" || -z "$IS_QRCODE" ]]; then
     if ! command -v qrencode &> /dev/null; then
@@ -102,3 +121,6 @@ else
     cat "$CLIENT_CONF"
     echo -e "${NC}"
 fi
+
+encrypt_config
+rm -f "$CLIENT_CONF"

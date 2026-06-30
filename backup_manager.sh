@@ -15,7 +15,7 @@ fi
 # Helper function to safely populate an array with existing backup files
 get_backups() {
     shopt -s nullglob
-    BACKUP_FILES=(easy-wireguard-server-*-backup.tar.gz)
+    BACKUP_FILES=(easy-wireguard-server-*-backup.tar.gz.enc)
     shopt -u nullglob
 }
 
@@ -24,16 +24,19 @@ create_backup() {
         echo -e "${RED}Error: /etc/wireguard directory not found. Is the server installed?${NC}"
         return
     fi
-    
+
     CURRENT_DATE=$(date +"%Y-%m-%d_%H-%M-%S")
     HOST_NAME=$(hostname -s)
-    BACKUP_FILE="easy-wireguard-server-${CURRENT_DATE}-${HOST_NAME}-backup.tar.gz"
+    BACKUP_FILE="easy-wireguard-server-${CURRENT_DATE}-${HOST_NAME}-backup.tar.gz.enc"
 
-    echo -e "\n${GREEN}Creating backup...${NC}"
-    if tar -czf "$BACKUP_FILE" -C /etc wireguard &> /dev/null; then
+    echo -en "${GREEN}Enter encryption password for backup: ${NC}"
+    read -rs BACKUP_PASS
+    echo
+
+    echo -e "\n${GREEN}Creating encrypted backup...${NC}"
+    if tar -cz -C /etc wireguard | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -pass "pass:$BACKUP_PASS" -out "$BACKUP_FILE"; then
         chmod 600 "$BACKUP_FILE"
-        echo -e "${PURPLE}Backup successfully created: ${BACKUP_FILE}${NC}"
-        echo -e "${RED}WARNING: This archive contains unencrypted private keys. Delete it when finished!${NC}"
+        echo -e "${PURPLE}Backup successfully created and encrypted: ${BACKUP_FILE}${NC}"
     else
         echo -e "${RED}Error: Backup creation failed.${NC}"
     fi
@@ -45,7 +48,7 @@ list_backups() {
         echo -e "\n${RED}No backup files found in the current directory.${NC}"
         return 1 # Return false so other functions know to stop
     fi
-    
+
     echo -e "\n${GREEN}Available Backup Archives:${NC}"
     for i in "${!BACKUP_FILES[@]}"; do
         size=$(du -h "${BACKUP_FILES[$i]}" | cut -f1)
@@ -56,39 +59,47 @@ list_backups() {
 
 restore_backup() {
     if ! list_backups; then return; fi
-    
+
     echo -en "\n${GREEN}Enter the number of the backup to restore (or press Enter to cancel): ${NC}"
     read -r index
     if [[ -z "$index" ]]; then return; fi
-    
+
     if [[ "$index" =~ ^[0-9]+$ ]] && [ "$index" -ge 0 ] && [ "$index" -lt "${#BACKUP_FILES[@]}" ]; then
         TARGET="${BACKUP_FILES[$index]}"
-        
+
         echo -en "${RED}WARNING: This will OVERWRITE your current live configuration with '$TARGET'. Proceed? [y/N]: ${NC}"
         read -r confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            echo -en "${GREEN}Enter decryption password for backup: ${NC}"
+            read -rs BACKUP_PASS
+            echo
+
             echo -e "${GREEN}Restoring $TARGET...${NC}"
-            
+
             TEMP_DIR=$(mktemp -d)
             chmod 700 "$TEMP_DIR"
-            tar -xzf "$TARGET" -C "$TEMP_DIR"
-            
-            mkdir -p /etc/wireguard
-            if [[ -d "$TEMP_DIR/wireguard" ]]; then
-                cp -a "$TEMP_DIR/wireguard/"* /etc/wireguard/
-            elif [[ -d "$TEMP_DIR/etc/wireguard" ]]; then
-                cp -a "$TEMP_DIR/etc/wireguard/"* /etc/wireguard/
+
+            if openssl enc -aes-256-cbc -d -salt -pbkdf2 -iter 100000 -pass "pass:$BACKUP_PASS" -in "$TARGET" | tar -xz -C "$TEMP_DIR"; then
+                mkdir -p /etc/wireguard
+                if [[ -d "$TEMP_DIR/wireguard" ]]; then
+                    cp -a "$TEMP_DIR/wireguard/"* /etc/wireguard/
+                elif [[ -d "$TEMP_DIR/etc/wireguard" ]]; then
+                    cp -a "$TEMP_DIR/etc/wireguard/"* /etc/wireguard/
+                fi
+
+                # Secure everything
+                chmod 700 /etc/wireguard
+                find /etc/wireguard -type f -exec chmod 600 {} +
+                [[ -d "/etc/wireguard/clients" ]] && chmod 700 /etc/wireguard/clients
+                rm -rf "$TEMP_DIR"
+
+                echo -e "${GREEN}Restarting WireGuard service...${NC}"
+                systemctl restart wg-quick@wg0.service
+                echo -e "${PURPLE}Backup successfully restored!${NC}"
+            else
+                echo -e "${RED}Error: Restoration failed. Incorrect password?${NC}"
+                rm -rf "$TEMP_DIR"
             fi
-            
-            # Secure everything
-            chmod 700 /etc/wireguard
-            find /etc/wireguard -type f -exec chmod 600 {} +
-            [[ -d "/etc/wireguard/clients" ]] && chmod 700 /etc/wireguard/clients
-            rm -rf "$TEMP_DIR"
-            
-            echo -e "${GREEN}Restarting WireGuard service...${NC}"
-            systemctl restart wg-quick@wg0.service
-            echo -e "${PURPLE}Backup successfully restored!${NC}"
         else
             echo -e "${GREEN}Restoration aborted.${NC}"
         fi
@@ -99,14 +110,14 @@ restore_backup() {
 
 delete_backup() {
     if ! list_backups; then return; fi
-    
+
     echo -en "\n${RED}Enter the number of the backup to DELETE (or press Enter to cancel): ${NC}"
     read -r index
     if [[ -z "$index" ]]; then return; fi
-    
+
     if [[ "$index" =~ ^[0-9]+$ ]] && [ "$index" -ge 0 ] && [ "$index" -lt "${#BACKUP_FILES[@]}" ]; then
         TARGET="${BACKUP_FILES[$index]}"
-        
+
         echo -en "${RED}Are you absolutely sure you want to PERMANENTLY DESTROY '$TARGET'? [y/N]: ${NC}"
         read -r confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
@@ -120,15 +131,38 @@ delete_backup() {
     fi
 }
 
+print_header() {
+    local title="$1"
+    local width=54
+    local padding=$(( (width - ${#title}) / 2 ))
+    echo -e "${PURPLE}╭$(printf '─%.0s' $(seq 1 $width))╮${NC}"
+    printf "${PURPLE}│${GREEN}%*s%s%*s${PURPLE}│\n${NC}" $padding "" "$title" $((width - padding - ${#title})) ""
+    echo -e "${PURPLE}╰$(printf '─%.0s' $(seq 1 $width))╯${NC}"
+}
+
+print_menu_item() {
+    local key="$1"
+    local desc="$2"
+    local color="${3:-$GREEN}"
+    local width=52
+    local str="${color}[${key}]${NC} ${desc}"
+    local plain_str="[${key}] ${desc}"
+    local padding=$(( width - ${#plain_str} + 1 ))
+    printf "${PURPLE}│${NC} %s%*s${PURPLE}│\n${NC}" "$str" $padding ""
+}
+
 # The Sub-Menu Loop
 while true; do
-    echo -e "\n${GREEN}--- Backup & Restore Manager ---${NC}"
-    echo "[1] Create a new backup"
-    echo "[2] Restore an existing backup"
-    echo "[3] List existing backup files"
-    echo "${RED}[4] Delete a backup file${NC}"
-    echo "[0] Return to Main Menu"
-    echo -en "${GREEN}Select an option [0-4]: ${NC}"
+    echo
+    print_header "Backup & Restore Manager"
+    echo -e "\n${PURPLE}╭$(printf '─%.0s' $(seq 1 54))╮${NC}"
+    print_menu_item "1" "Create a new backup"
+    print_menu_item "2" "Restore an existing backup"
+    print_menu_item "3" "List existing backup files"
+    print_menu_item "4" "Delete a backup file" "$RED"
+    print_menu_item "0" "Return to Main Menu"
+    echo -e "${PURPLE}╰$(printf '─%.0s' $(seq 1 54))╯${NC}"
+    echo -en "${GREEN}▶ Select an option [0-4]: ${NC}"
     read -r OPTION
 
     case "$OPTION" in
