@@ -78,29 +78,52 @@ update_setting() {
     fi
 }
 
-display_menu() {
-    echo -en "\n${GREEN}Choose the action:
-[1] Setup WireGuard server
-[2] Add new client (peer)
-[3] Show client (peer) QR
-[4] Configure clients (Check/Edit/Remove)
-[5] Backup & Restore Manager
-[6] Domain-Based Split Tunneling
-[s] Settings (MTU, DNS, AllowedIPs)
-${RED}[r] Remove WireGuard server from this system${GREEN}
-[q] Exit
+print_header() {
+    local title="$1"
+    local width=54
+    local padding=$(( (width - ${#title}) / 2 ))
+    echo -e "${PURPLE}╭$(printf '─%.0s' $(seq 1 $width))╮${NC}"
+    printf "${PURPLE}│${GREEN}%*s%s%*s${PURPLE}│\n${NC}" $padding "" "$title" $((width - padding - ${#title})) ""
+    echo -e "${PURPLE}╰$(printf '─%.0s' $(seq 1 $width))╯${NC}"
+}
 
-Option: ${NC}"
+print_menu_item() {
+    local key="$1"
+    local desc="$2"
+    local color="${3:-$GREEN}"
+    local width=52
+    local str="${color}[${key}]${NC} ${desc}"
+    local plain_str="[${key}] ${desc}"
+    local padding=$(( width - ${#plain_str} + 1 ))
+    printf "${PURPLE}│${NC} %s%*s${PURPLE}│\n${NC}" "$str" $padding ""
+}
+
+display_menu() {
+    echo -e "\n${PURPLE}╭$(printf '─%.0s' $(seq 1 54))╮${NC}"
+    print_menu_item "1" "Setup WireGuard server"
+    print_menu_item "2" "Add new client (peer)"
+    print_menu_item "3" "Show client (peer) QR"
+    print_menu_item "4" "Configure clients (Check/Edit/Remove)"
+    print_menu_item "5" "Backup & Restore Manager"
+    print_menu_item "6" "Domain-Based Split Tunneling"
+    print_menu_item "s" "Settings (MTU, DNS, AllowedIPs)"
+    print_menu_item "r" "Remove WireGuard server from this system" "$RED"
+    print_menu_item "q" "Exit"
+    echo -e "${PURPLE}╰$(printf '─%.0s' $(seq 1 54))╯${NC}"
+    echo -en "${GREEN}▶ Option: ${NC}"
 }
 
 settings_menu() {
     while true; do
-        echo -e "\n${PURPLE}--- Settings ---${NC}"
-        echo -e "${GREEN}[1] Default MTU: ${NC}${DEFAULT_MTU:-1280}"
-        echo -e "${GREEN}[2] Default DNS: ${NC}${DEFAULT_DNS:-"94.140.14.49, 9.9.9.9, 94.140.14.59"}"
-        echo -e "${GREEN}[3] Default Allowed IPs: ${NC}${DEFAULT_ALLOWED_IPS:-"0.0.0.0/1, 128.0.0.0/1"}"
-        echo -e "${GREEN}[b] Back to Main Menu${NC}"
-        echo -en "${PURPLE}Select option: ${NC}"
+        echo
+        print_header "Settings"
+        echo -e "\n${PURPLE}╭$(printf '─%.0s' $(seq 1 54))╮${NC}"
+        print_menu_item "1" "Default MTU: ${DEFAULT_MTU:-1280}"
+        print_menu_item "2" "Default DNS: ${DEFAULT_DNS:-"94.140.14.49, 9.9.9.9, 94.140.14.59"}"
+        print_menu_item "3" "Default Allowed IPs: ${DEFAULT_ALLOWED_IPS:-"0.0.0.0/1, 128.0.0.0/1"}"
+        print_menu_item "b" "Back to Main Menu"
+        echo -e "${PURPLE}╰$(printf '─%.0s' $(seq 1 54))╯${NC}"
+        echo -en "${GREEN}▶ Select option: ${NC}"
         read -r SET_OPT
 
         case "$SET_OPT" in
@@ -131,9 +154,7 @@ main() {
     # Loop the main menu so it returns after completing a task
     while true; do
         clear
-        echo -e "${PURPLE}======================================================${NC}"
-        echo -e "${GREEN}       🍪 Cookie's Easy WireGuard Manager${NC}"
-        echo -e "${PURPLE}======================================================${NC}"
+        print_header "🍪 Cookie's Easy WireGuard Manager"
         display_menu
         read -r OPTION
 

@@ -26,6 +26,8 @@ This wrapper dynamically pulls the latest scripts from GitHub, ensuring your ser
 - **Encrypted Backups:** All backups are now AES-256 encrypted using OpenSSL.
 - **Smart IP Tracking:** Intelligently scans the server to dynamically assign IP addresses, preventing crashes from corrupted or empty lines.
 - **Unified Backup Manager:** Securely create, list, restore, and destroy server backups from a single interactive menu.
+- **Modern UI/UX:** The entire CLI application now features a polished, ANSI boxed layout with standardized color rendering and intuitive menus, dropping ugly generic plain-text in favor of modern design.
+- **Network Ports:** The application heavily relies on two primary ports. The default port for the WireGuard UDP VPN tunnel is typically `443` or a randomly generated unprivileged UDP port, but can be manually defined during setup. The default server port for SSH administration is TCP port `22`.
 
 ---
 

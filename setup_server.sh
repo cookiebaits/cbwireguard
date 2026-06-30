@@ -117,8 +117,8 @@ ListenPort = $PORT
 MTU = $MTU
 SaveConfig = false
 
-PostUp = iptables -A FORWARD -i wg0 -j ACCEPT
-PostUp = iptables -A FORWARD -o wg0 -j ACCEPT
+PostUp = iptables -I FORWARD 1 -i wg0 -j ACCEPT
+PostUp = iptables -I FORWARD 1 -o wg0 -j ACCEPT
 PostUp = iptables -t nat -A POSTROUTING -s $SERVER_SUBNET -o $NETWORK_DEVICE -j MASQUERADE
 PostUp = iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PreDown = iptables -D FORWARD -i wg0 -j ACCEPT
@@ -135,10 +135,16 @@ sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
 sed -i '/net.ipv4.conf.all.rp_filter/d' /etc/sysctl.conf
 sed -i '/net.ipv4.conf.default.rp_filter/d' /etc/sysctl.conf
+sed -i '/net.ipv4.tcp_mtu_probing/d' /etc/sysctl.conf
+sed -i '/net.core.rmem_max/d' /etc/sysctl.conf
+sed -i '/net.core.wmem_max/d' /etc/sysctl.conf
 
 echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
 echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
 echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+echo "net.ipv4.tcp_mtu_probing=1" >> /etc/sysctl.conf
+echo "net.core.rmem_max=2500000" >> /etc/sysctl.conf
+echo "net.core.wmem_max=2500000" >> /etc/sysctl.conf
 # P2: Harden network stack (using loose mode to prevent routing drops)
 echo "net.ipv4.conf.all.rp_filter=2" >> /etc/sysctl.conf
 echo "net.ipv4.conf.default.rp_filter=2" >> /etc/sysctl.conf

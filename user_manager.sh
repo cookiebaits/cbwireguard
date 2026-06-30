@@ -172,6 +172,26 @@ show_user_by_name() {
     fi
 }
 
+print_header() {
+    local title="$1"
+    local width=54
+    local padding=$(( (width - ${#title}) / 2 ))
+    echo -e "${PURPLE}╭$(printf '─%.0s' $(seq 1 $width))╮${NC}"
+    printf "${PURPLE}│${GREEN}%*s%s%*s${PURPLE}│\n${NC}" $padding "" "$title" $((width - padding - ${#title})) ""
+    echo -e "${PURPLE}╰$(printf '─%.0s' $(seq 1 $width))╯${NC}"
+}
+
+print_menu_item() {
+    local key="$1"
+    local desc="$2"
+    local color="${3:-$GREEN}"
+    local width=52
+    local str="${color}[${key}]${NC} ${desc}"
+    local plain_str="[${key}] ${desc}"
+    local padding=$(( width - ${#plain_str} + 1 ))
+    printf "${PURPLE}│${NC} %s%*s${PURPLE}│\n${NC}" "$str" $padding ""
+}
+
 # Main Menu logic or CLI arg
 if [[ "${1:-}" == "--show" && -n "${2:-}" ]]; then
     show_user_by_name "$2"
@@ -179,13 +199,16 @@ if [[ "${1:-}" == "--show" && -n "${2:-}" ]]; then
 fi
 
 while true; do
-    echo -e "\n${PURPLE}--- User Management (Configure Clients) ---${NC}"
-    echo "[1] List users"
-    echo "[2] Check configuration (Show QR/Text)"
-    echo "[3] Edit configuration"
-    echo "${RED}[4] Remove user (Delete)${NC}"
-    echo "[0] Back to Main Menu"
-    echo -en "${GREEN}Option: ${NC}"
+    echo
+    print_header "User Management (Configure Clients)"
+    echo -e "\n${PURPLE}╭$(printf '─%.0s' $(seq 1 54))╮${NC}"
+    print_menu_item "1" "List users"
+    print_menu_item "2" "Check configuration (Show QR/Text)"
+    print_menu_item "3" "Edit configuration"
+    print_menu_item "4" "Remove user (Delete)" "$RED"
+    print_menu_item "0" "Back to Main Menu"
+    echo -e "${PURPLE}╰$(printf '─%.0s' $(seq 1 54))╯${NC}"
+    echo -en "${GREEN}▶ Option: ${NC}"
     read -r opt
     case "$opt" in
         1) list_users || true ;;

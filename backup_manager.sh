@@ -131,15 +131,38 @@ delete_backup() {
     fi
 }
 
+print_header() {
+    local title="$1"
+    local width=54
+    local padding=$(( (width - ${#title}) / 2 ))
+    echo -e "${PURPLE}╭$(printf '─%.0s' $(seq 1 $width))╮${NC}"
+    printf "${PURPLE}│${GREEN}%*s%s%*s${PURPLE}│\n${NC}" $padding "" "$title" $((width - padding - ${#title})) ""
+    echo -e "${PURPLE}╰$(printf '─%.0s' $(seq 1 $width))╯${NC}"
+}
+
+print_menu_item() {
+    local key="$1"
+    local desc="$2"
+    local color="${3:-$GREEN}"
+    local width=52
+    local str="${color}[${key}]${NC} ${desc}"
+    local plain_str="[${key}] ${desc}"
+    local padding=$(( width - ${#plain_str} + 1 ))
+    printf "${PURPLE}│${NC} %s%*s${PURPLE}│\n${NC}" "$str" $padding ""
+}
+
 # The Sub-Menu Loop
 while true; do
-    echo -e "\n${GREEN}--- Backup & Restore Manager ---${NC}"
-    echo "[1] Create a new backup"
-    echo "[2] Restore an existing backup"
-    echo "[3] List existing backup files"
-    echo "${RED}[4] Delete a backup file${NC}"
-    echo "[0] Return to Main Menu"
-    echo -en "${GREEN}Select an option [0-4]: ${NC}"
+    echo
+    print_header "Backup & Restore Manager"
+    echo -e "\n${PURPLE}╭$(printf '─%.0s' $(seq 1 54))╮${NC}"
+    print_menu_item "1" "Create a new backup"
+    print_menu_item "2" "Restore an existing backup"
+    print_menu_item "3" "List existing backup files"
+    print_menu_item "4" "Delete a backup file" "$RED"
+    print_menu_item "0" "Return to Main Menu"
+    echo -e "${PURPLE}╰$(printf '─%.0s' $(seq 1 54))╯${NC}"
+    echo -en "${GREEN}▶ Select an option [0-4]: ${NC}"
     read -r OPTION
 
     case "$OPTION" in

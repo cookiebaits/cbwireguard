@@ -75,16 +75,39 @@ remove_domain() {
     fi
 }
 
+print_header() {
+    local title="$1"
+    local width=54
+    local padding=$(( (width - ${#title}) / 2 ))
+    echo -e "${PURPLE}╭$(printf '─%.0s' $(seq 1 $width))╮${NC}"
+    printf "${PURPLE}│${GREEN}%*s%s%*s${PURPLE}│\n${NC}" $padding "" "$title" $((width - padding - ${#title})) ""
+    echo -e "${PURPLE}╰$(printf '─%.0s' $(seq 1 $width))╯${NC}"
+}
+
+print_menu_item() {
+    local key="$1"
+    local desc="$2"
+    local color="${3:-$GREEN}"
+    local width=52
+    local str="${color}[${key}]${NC} ${desc}"
+    local plain_str="[${key}] ${desc}"
+    local padding=$(( width - ${#plain_str} + 1 ))
+    printf "${PURPLE}│${NC} %s%*s${PURPLE}│\n${NC}" "$str" $padding ""
+}
+
 main_menu() {
     init_bypass
     while true; do
-        echo -e "\n${PURPLE}--- Domain Bypass Manager (Split Tunneling) ---${NC}"
-        echo "[1] Add domain to bypass"
-        echo "[2] Remove domain from bypass"
-        echo "[3] List bypass domains"
-        echo "[4] Refresh/Apply routes"
-        echo "[0] Back to Main Menu"
-        echo -en "${GREEN}Option: ${NC}"
+        echo
+        print_header "Domain Bypass Manager (Split Tunneling)"
+        echo -e "\n${PURPLE}╭$(printf '─%.0s' $(seq 1 54))╮${NC}"
+        print_menu_item "1" "Add domain to bypass"
+        print_menu_item "2" "Remove domain from bypass"
+        print_menu_item "3" "List bypass domains"
+        print_menu_item "4" "Refresh/Apply routes"
+        print_menu_item "0" "Back to Main Menu"
+        echo -e "${PURPLE}╰$(printf '─%.0s' $(seq 1 54))╯${NC}"
+        echo -en "${GREEN}▶ Option: ${NC}"
         read -r opt
         case "$opt" in
             1) add_domain ;;
