@@ -63,7 +63,9 @@ list_users() {
 show_user() {
     list_users || return
     echo -en "${GREEN}Enter username to view: ${NC}"
-    read -r username
+    read -r raw_username
+    local username
+    username=$(echo "$raw_username" | tr -cd '[:alnum:]_-')
     local file="${CLIENT_DIR}/${username}.conf.enc"
     
     if [[ -f "$file" ]]; then
@@ -88,7 +90,9 @@ show_user() {
 delete_user() {
     list_users || return
     echo -en "${RED}Enter username to DELETE: ${NC}"
-    read -r username
+    read -r raw_username
+    local username
+    username=$(echo "$raw_username" | tr -cd '[:alnum:]_-')
     local file="${CLIENT_DIR}/${username}.conf.enc"
     
     if [[ -f "$file" ]]; then
@@ -121,7 +125,9 @@ delete_user() {
 edit_user() {
     list_users || return
     echo -en "${GREEN}Enter username to EDIT: ${NC}"
-    read -r username
+    read -r raw_username
+    local username
+    username=$(echo "$raw_username" | tr -cd '[:alnum:]_-')
     local file="${CLIENT_DIR}/${username}.conf.enc"
     
     if [[ -f "$file" ]]; then
@@ -150,7 +156,8 @@ edit_user() {
 }
 
 show_user_by_name() {
-    local username="$1"
+    local username
+    username=$(echo "$1" | tr -cd '[:alnum:]_-')
     local file="${CLIENT_DIR}/${username}.conf.enc"
     
     if [[ -f "$file" ]]; then
