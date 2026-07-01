@@ -46,7 +46,8 @@ echo "[6] 4500 (IPsec NAT-T)"
 echo "[7] 80 (HTTP)"
 echo "[8] 8080 (HTTP Alt)"
 echo "[9] 8443 (HTTPS Alt)"
-echo -en "${PURPLE}Select option [1-9] or enter custom port [Default 443]: ${NC}"
+echo "[10] Custom port number"
+echo -en "${PURPLE}Select option [1-10] [Default 443]: ${NC}"
 read -r input_VPN_PORT
 
 while true; do
@@ -60,20 +61,26 @@ while true; do
         7) PORT="80" ;;
         8) PORT="8080" ;;
         9) PORT="8443" ;;
-    "") PORT="443" ;;
-        *)
-            if [[ "$input_VPN_PORT" =~ ^[0-9]+$ ]]; then
-                PORT="$input_VPN_PORT"
+        10)
+            echo -en "${GREEN}Enter custom port number: ${NC}"
+            read -r custom_port
+            if [[ "$custom_port" =~ ^[0-9]+$ ]] && [ "$custom_port" -ge 1 ] && [ "$custom_port" -le 65535 ]; then
+                PORT="$custom_port"
             else
+                echo -e "${RED}Invalid port number. Defaulting to 443.${NC}"
                 PORT="443"
-                echo -e "${RED}Invalid input. Defaulting to 443.${NC}"
             fi
+            ;;
+        "") PORT="443" ;;
+        *)
+            PORT="443"
+            echo -e "${RED}Invalid input. Defaulting to 443.${NC}"
             ;;
     esac
 
     if check_port_usage "$PORT"; then
         echo -e "${RED}Error: Port ${PORT} is already in use by another process!${NC}"
-        echo -en "${GREEN}Please enter another port or select from the menu above: ${NC}"
+        echo -en "${GREEN}Please select from the menu above: ${NC}"
         read -r input_VPN_PORT
     else
         break
