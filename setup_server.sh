@@ -30,7 +30,7 @@ fi
 
 check_port_usage() {
     local port=$1
-    if ss -lnup | grep -q ":${port} "; then
+    if ss -lnu | awk '{print $4}' | grep -q ":${port}$"; then
         return 0 # Port is in use
     fi
     return 1 # Port is free
