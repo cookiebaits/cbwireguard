@@ -92,7 +92,7 @@ print_menu_item() {
     local str="${color}[${key}]${NC} ${desc}"
     local plain_str="[${key}] ${desc}"
     local padding=$(( width - ${#plain_str} + 1 ))
-    printf "${PURPLE}│${NC} %s%*s${PURPLE}│\n${NC}" "$str" $padding ""
+    printf "${PURPLE}│${NC} %b%*s${PURPLE}│\n${NC}" "$str" $padding ""
 }
 
 main_menu() {
