@@ -19,15 +19,14 @@ This wrapper dynamically pulls the latest scripts from GitHub, ensuring your ser
 
 ## 🚀 Key Feature Upgrades
 
-- **Domain-Based Split Tunneling:** Bypass specific domains from the VPN tunnel in real-time.
-- **Maximized Throughput:** Injects Kernel-level BBR (Bottleneck Bandwidth and RTT) and FQ queueing, paired with an optimized default MTU (1280) to eliminate packet fragmentation and maximize speeds.
+- **Maximized Throughput:** Injects Kernel-level BBR (Bottleneck Bandwidth and RTT) and FQ queueing, paired with an optimized default MTU (1420) to eliminate packet fragmentation and maximize speeds.
 - **Zero-Downtime Hot Reloading:** Adding a new peer instantly injects them into the live server. Existing users are never disconnected when the configuration updates.
 - **Military-Grade Security:** Enforces strict execution rules (`set -euo pipefail`), root-only directory locks (`chmod 700`), and secure unprivileged port generation.
 - **Encrypted Backups:** All backups are now AES-256 encrypted using OpenSSL.
 - **Smart IP Tracking:** Intelligently scans the server to dynamically assign IP addresses, preventing crashes from corrupted or empty lines.
 - **Unified Backup Manager:** Securely create, list, restore, and destroy server backups from a single interactive menu.
 - **Modern UI/UX:** The entire CLI application now features a polished, ANSI boxed layout with standardized color rendering and intuitive menus, dropping ugly generic plain-text in favor of modern design.
-- **Network Ports:** The application heavily relies on two primary ports. The default port for the WireGuard UDP VPN tunnel is typically `443` or a randomly generated unprivileged UDP port, but can be manually defined during setup. The default server port for SSH administration is TCP port `22`.
+- **Network Ports:** The application heavily relies on two primary ports. The default port for the WireGuard UDP VPN tunnel is typically `51820` or a randomly generated unprivileged UDP port, but can be manually defined during setup. The default server port for SSH administration is TCP port `22`.
 
 ---
 
@@ -77,7 +76,7 @@ Delete: Securely destroys backup archives to keep your server secure.
 
 ## ⚙️ Step 6: Customizing Defaults (Option s)
 You can now customize global defaults for all future clients:
-- **Default MTU:** Request specifically set to 1280 to bypass MTU-based detection.
+- **Default MTU:** Request specifically set to 1420.
 - **Default DNS:** Set to a high-privacy, ad-blocking DNS cluster.
 - **Default Allowed IPs:** Configured as `0.0.0.0/1, 128.0.0.0/1` by default.
 
