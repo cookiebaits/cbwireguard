@@ -19,7 +19,7 @@ init_environment() {
 
     if [[ ! -f "$SETTINGS_FILE" ]]; then
         cat <<EOF > "$SETTINGS_FILE"
-DEFAULT_MTU=1280
+DEFAULT_MTU=1420
 DEFAULT_DNS="94.140.14.49, 9.9.9.9, 94.140.14.59"
 DEFAULT_ALLOWED_IPS="0.0.0.0/1, 128.0.0.0/1"
 EOF
@@ -95,7 +95,7 @@ Option: ${NC}"
 settings_menu() {
     while true; do
         echo -e "\n${PURPLE}--- Settings ---${NC}"
-        echo -e "${GREEN}[1] Default MTU: ${NC}${DEFAULT_MTU:-1280}"
+        echo -e "${GREEN}[1] Default MTU: ${NC}${DEFAULT_MTU:-1420}"
         echo -e "${GREEN}[2] Default DNS: ${NC}${DEFAULT_DNS:-"94.140.14.49, 9.9.9.9, 94.140.14.59"}"
         echo -e "${GREEN}[3] Default Allowed IPs: ${NC}${DEFAULT_ALLOWED_IPS:-"0.0.0.0/1, 128.0.0.0/1"}"
         echo -e "${GREEN}[b] Back to Main Menu${NC}"
