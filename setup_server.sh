@@ -1,85 +1,34 @@
 #!/bin/bash
 set -euo pipefail
 
-# P1: OS Detection to fix unbound 'distro' variable
-if [[ -f /etc/os-release ]]; then
-    source /etc/os-release
-    distro=$ID
-else
-    distro="unknown"
-fi
-
 GREEN='\033[0;32m'
 PURPLE='\033[0;35m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-SETTINGS_FILE="/root/easy_wireguard/settings.conf"
+SETTINGS_FILE="settings.conf"
 if [[ -f "$SETTINGS_FILE" ]]; then
     # shellcheck source=/dev/null
     source "$SETTINGS_FILE"
 fi
 
-# P3: Default MTU from settings or 1420
-MTU=${DEFAULT_MTU:-1420}
+# P3: Default MTU from settings or 1280
+MTU=${DEFAULT_MTU:-1280}
 
 if [[ "$EUID" -ne 0 ]]; then
     echo -e "${RED}Security Error: Please run this script as root (sudo).${NC}"
     exit 1
 fi
 
-check_port_usage() {
-    local port=$1
-    if ss -lnu | awk '{print $4}' | grep -q ":${port}$"; then
-        return 0 # Port is in use
-    fi
-    return 1 # Port is free
-}
-
-echo -e "${GREEN}Choose port for VPN:${NC}"
-echo "[1] 51820 (WireGuard Default)"
-echo "[2] 53 (DNS)"
-echo "[3] 123 (NTP)"
-echo "[4] 1194 (OpenVPN UDP)"
-echo "[5] 500 (ISAKMP)"
-echo "[6] 4500 (IPsec NAT-T)"
-echo "[7] Custom port number"
-echo -en "${PURPLE}Select option [1-7] [Default 51820]: ${NC}"
+echo -en "${GREEN}Choose port for VPN (1024-65535), leave blank for random: ${NC}"
 read -r input_VPN_PORT
 
-while true; do
-    case "$input_VPN_PORT" in
-        1) PORT="51820" ;;
-        2) PORT="53" ;;
-        3) PORT="123" ;;
-        4) PORT="1194" ;;
-        5) PORT="500" ;;
-        6) PORT="4500" ;;
-        7)
-            echo -en "${GREEN}Enter custom port number: ${NC}"
-            read -r custom_port
-            if [[ "$custom_port" =~ ^[0-9]+$ ]] && [ "$custom_port" -ge 1 ] && [ "$custom_port" -le 65535 ]; then
-                PORT="$custom_port"
-            else
-                echo -e "${RED}Invalid port number. Defaulting to 51820.${NC}"
-                PORT="51820"
-            fi
-            ;;
-        "") PORT="51820" ;;
-        *)
-            PORT="51820"
-            echo -e "${RED}Invalid input. Defaulting to 51820.${NC}"
-            ;;
-    esac
-
-    if check_port_usage "$PORT"; then
-        echo -e "${RED}Error: Port ${PORT} is already in use by another process!${NC}"
-        echo -en "${GREEN}Please select from the menu above (1-7): ${NC}"
-        read -r input_VPN_PORT
-    else
-        break
-    fi
-done
+if [[ -z "$input_VPN_PORT" ]]; then
+    PORT=$((RANDOM % 60000 + 1025))
+    echo -e "${PURPLE}Selected random port: ${PORT}${NC}"
+else
+    PORT="$input_VPN_PORT"
+fi
 
 echo -en "${GREEN}Enter your SSH port, leave blank for default [22]: ${NC}"
 read -r input_SSH_PORT
@@ -96,10 +45,10 @@ if [[ -n "$input_MTU" ]]; then
 fi
 
 SERVER_PRIVATE_IP="10.18.0.1"
-SERVER_SUBNET="10.18.0.0/24"
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
-apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq
+apt-get update -y
+apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2
 
 echo -e "${GREEN}Generating secure encryption keys...${NC}"
 mkdir -p /etc/wireguard
@@ -123,14 +72,10 @@ ListenPort = $PORT
 MTU = $MTU
 SaveConfig = false
 
-PostUp = iptables -I FORWARD 1 -i wg0 -j ACCEPT
-PostUp = iptables -I FORWARD 1 -o wg0 -j ACCEPT
-PostUp = iptables -t nat -A POSTROUTING -s $SERVER_SUBNET -o $NETWORK_DEVICE -j MASQUERADE
-PostUp = iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-PreDown = iptables -D FORWARD -i wg0 -j ACCEPT
-PreDown = iptables -D FORWARD -o wg0 -j ACCEPT
-PreDown = iptables -t nat -D POSTROUTING -s $SERVER_SUBNET -o $NETWORK_DEVICE -j MASQUERADE
-PreDown = iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+PostUp = ufw route allow in on wg0 out on $NETWORK_DEVICE
+PostUp = iptables -t nat -I POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
+PreDown = ufw route delete allow in on wg0 out on $NETWORK_DEVICE
+PreDown = iptables -t nat -D POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
 EOF
 
 chmod 600 /etc/wireguard/wg0.conf
@@ -139,40 +84,20 @@ echo -e "${GREEN}Optimizing Network Throughput (BBR & Forwarding)...${NC}"
 sed -i '/net.ipv4.ip_forward/d' /etc/sysctl.conf
 sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
 sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.all.rp_filter/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.default.rp_filter/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_mtu_probing/d' /etc/sysctl.conf
-sed -i '/net.core.rmem_max/d' /etc/sysctl.conf
-sed -i '/net.core.wmem_max/d' /etc/sysctl.conf
 
 echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
 echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
 echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
-echo "net.ipv4.tcp_mtu_probing=1" >> /etc/sysctl.conf
-echo "net.core.rmem_max=2500000" >> /etc/sysctl.conf
-echo "net.core.wmem_max=2500000" >> /etc/sysctl.conf
-# P2: Harden network stack (using loose mode to prevent routing drops)
-echo "net.ipv4.conf.all.rp_filter=2" >> /etc/sysctl.conf
-echo "net.ipv4.conf.default.rp_filter=2" >> /etc/sysctl.conf
 sysctl -p
 
 echo -e "${GREEN}Configuring UFW Firewall...${NC}"
-sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw || true
-sed -i 's/#net\/ipv4\/ip_forward=1/net\/ipv4\/ip_forward=1/' /etc/ufw/sysctl.conf || true
 ufw allow "$PORT/udp"
 ufw allow "$SSH_PORT/tcp"
 ufw --force enable
 
 echo -e "${GREEN}Starting WireGuard service...${NC}"
 systemctl enable wg-quick@wg0.service
-if ! systemctl restart wg-quick@wg0.service; then
-    echo -e "${RED}Error: Failed to start WireGuard service.${NC}"
-    echo -e "${PURPLE}--- Diagnostic Logs ---${NC}"
-    journalctl -xeu wg-quick@wg0.service | tail -n 20
-    echo -e "${PURPLE}-----------------------${NC}"
-    systemctl status wg-quick@wg0.service --no-pager
-    exit 1
-fi
+systemctl restart wg-quick@wg0.service
 systemctl status --no-pager -l wg-quick@wg0.service
 
 echo -e "\n${PURPLE}======================================================${NC}"
