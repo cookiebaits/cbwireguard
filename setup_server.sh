@@ -20,8 +20,8 @@ if [[ -f "$SETTINGS_FILE" ]]; then
     source "$SETTINGS_FILE"
 fi
 
-# P3: Default MTU from settings or 1280
-MTU=${DEFAULT_MTU:-1280}
+# P3: Default MTU from settings or 1420
+MTU=${DEFAULT_MTU:-1420}
 
 if [[ "$EUID" -ne 0 ]]; then
     echo -e "${RED}Security Error: Please run this script as root (sudo).${NC}"
