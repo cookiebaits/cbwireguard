@@ -20,8 +20,8 @@ if [[ -f "$SETTINGS_FILE" ]]; then
     source "$SETTINGS_FILE"
 fi
 
-# P3: Default MTU from settings or 1280
-MTU=${DEFAULT_MTU:-1280}
+# P3: Default MTU from settings or 1420
+MTU=${DEFAULT_MTU:-1420}
 
 if [[ "$EUID" -ne 0 ]]; then
     echo -e "${RED}Security Error: Please run this script as root (sudo).${NC}"
@@ -37,50 +37,44 @@ check_port_usage() {
 }
 
 echo -e "${GREEN}Choose port for VPN:${NC}"
-echo "[1] 443"
+echo "[1] 51820 (WireGuard Default)"
 echo "[2] 53 (DNS)"
 echo "[3] 123 (NTP)"
 echo "[4] 1194 (OpenVPN UDP)"
 echo "[5] 500 (ISAKMP)"
 echo "[6] 4500 (IPsec NAT-T)"
-echo "[7] 80 (HTTP)"
-echo "[8] 8080 (HTTP Alt)"
-echo "[9] 8443 (HTTPS Alt)"
-echo "[10] Custom port number"
-echo -en "${PURPLE}Select option [1-10] [Default 443]: ${NC}"
+echo "[7] Custom port number"
+echo -en "${PURPLE}Select option [1-7] [Default 51820]: ${NC}"
 read -r input_VPN_PORT
 
 while true; do
     case "$input_VPN_PORT" in
-        1) PORT="443" ;;
+        1) PORT="51820" ;;
         2) PORT="53" ;;
         3) PORT="123" ;;
         4) PORT="1194" ;;
         5) PORT="500" ;;
         6) PORT="4500" ;;
-        7) PORT="80" ;;
-        8) PORT="8080" ;;
-        9) PORT="8443" ;;
-        10)
+        7)
             echo -en "${GREEN}Enter custom port number: ${NC}"
             read -r custom_port
             if [[ "$custom_port" =~ ^[0-9]+$ ]] && [ "$custom_port" -ge 1 ] && [ "$custom_port" -le 65535 ]; then
                 PORT="$custom_port"
             else
-                echo -e "${RED}Invalid port number. Defaulting to 443.${NC}"
-                PORT="443"
+                echo -e "${RED}Invalid port number. Defaulting to 51820.${NC}"
+                PORT="51820"
             fi
             ;;
-        "") PORT="443" ;;
+        "") PORT="51820" ;;
         *)
-            PORT="443"
-            echo -e "${RED}Invalid input. Defaulting to 443.${NC}"
+            PORT="51820"
+            echo -e "${RED}Invalid input. Defaulting to 51820.${NC}"
             ;;
     esac
 
     if check_port_usage "$PORT"; then
         echo -e "${RED}Error: Port ${PORT} is already in use by another process!${NC}"
-        echo -en "${GREEN}Please select from the menu above: ${NC}"
+        echo -en "${GREEN}Please select from the menu above (1-7): ${NC}"
         read -r input_VPN_PORT
     else
         break

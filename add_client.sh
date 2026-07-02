@@ -13,7 +13,7 @@ if [[ -f "$SETTINGS_FILE" ]]; then
 fi
 
 # P3: Defaults from settings
-MTU=${DEFAULT_MTU:-1280}
+MTU=${DEFAULT_MTU:-1420}
 DNS=${DEFAULT_DNS:-"94.140.14.49, 9.9.9.9, 94.140.14.59"}
 ALLOWED_IPS=${DEFAULT_ALLOWED_IPS:-"0.0.0.0/1, 128.0.0.0/1"}
 

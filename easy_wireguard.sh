@@ -19,7 +19,7 @@ init_environment() {
 
     if [[ ! -f "$SETTINGS_FILE" ]]; then
         cat <<EOF > "$SETTINGS_FILE"
-DEFAULT_MTU=1280
+DEFAULT_MTU=1420
 DEFAULT_DNS="94.140.14.49, 9.9.9.9, 94.140.14.59"
 DEFAULT_ALLOWED_IPS="0.0.0.0/1, 128.0.0.0/1"
 EOF
@@ -105,7 +105,6 @@ display_menu() {
     print_menu_item "3" "Show client (peer) QR"
     print_menu_item "4" "Configure clients (Check/Edit/Remove)"
     print_menu_item "5" "Backup & Restore Manager"
-    print_menu_item "6" "Domain-Based Split Tunneling"
     print_menu_item "s" "Settings (MTU, DNS, AllowedIPs)"
     print_menu_item "r" "Remove WireGuard server from this system" "$RED"
     print_menu_item "q" "Exit"
@@ -118,7 +117,7 @@ settings_menu() {
         echo
         print_header "Settings"
         echo -e "\n${PURPLE}╭$(printf '─%.0s' $(seq 1 54))╮${NC}"
-        print_menu_item "1" "Default MTU: ${DEFAULT_MTU:-1280}"
+        print_menu_item "1" "Default MTU: ${DEFAULT_MTU:-1420}"
         print_menu_item "2" "Default DNS: ${DEFAULT_DNS:-"94.140.14.49, 9.9.9.9, 94.140.14.59"}"
         print_menu_item "3" "Default Allowed IPs: ${DEFAULT_ALLOWED_IPS:-"0.0.0.0/1, 128.0.0.0/1"}"
         print_menu_item "b" "Back to Main Menu"
@@ -173,7 +172,6 @@ main() {
                 ;;
             4) fetch_and_run "user_manager.sh" ;;
             5) fetch_and_run "backup_manager.sh" ;;
-            6) fetch_and_run "domain_bypass.sh" ;;
             s) settings_menu ;;
             r)
                 fetch_and_run "remove_server.sh"
