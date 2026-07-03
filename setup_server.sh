@@ -124,7 +124,7 @@ rm -rf /etc/wireguard
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
 # P2: Removed apt-get update
-apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq
+apt-get update -y && apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq
 
 echo -e "${GREEN}Generating secure encryption keys...${NC}"
 mkdir -p /etc/wireguard

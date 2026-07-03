@@ -86,7 +86,6 @@ display_menu() {
 [4] Configure clients (Check/Edit/Remove)
 [5] Backup & Restore Manager
 [6] Domain-Based Split Tunneling
-[7] Install/Manage Cloak (Stealth Plugin)
 [s] Settings (MTU, DNS, AllowedIPs)
 ${RED}[r] Remove WireGuard server from this system${GREEN}
 [q] Exit
@@ -149,7 +148,6 @@ print_menu() {
     echo -e "${PURPLE}│ ${NC}[4] Configure clients (Check/Edit/Remove)         ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${NC}[5] Backup & Restore Manager                      ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${NC}[6] Domain-Based Split Tunneling                  ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│ ${NC}[7] Install/Manage Cloak (Stealth Plugin)         ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${NC}[s] Settings (MTU, DNS, AllowedIPs)               ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${RED}[r] Remove WireGuard server from this system      ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${NC}[q] Exit                                          ${PURPLE}│${NC}"
@@ -181,7 +179,6 @@ main() {
             4) fetch_and_run "user_manager.sh" ;;
             5) fetch_and_run "backup_manager.sh" ;;
             6) fetch_and_run "domain_bypass.sh" ;;
-            7) fetch_and_run "Cloak2-Installer.sh" ;;
             s) settings_menu ;;
             r)
                 fetch_and_run "remove_server.sh"
