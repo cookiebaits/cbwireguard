@@ -1,53 +1,110 @@
 #!/bin/bash
-# Strict mode for maximum stability and security
-set -euo pipefail
+
+# Cookie's Easy WireGuard Manager - Remove Server
 
 RED='\033[0;31m'
+ORANGE='\033[0;33m'
 GREEN='\033[0;32m'
-PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
-# P2: Security Check - Require root access to remove core system packages
-if [[ "$EUID" -ne 0 ]]; then
-    echo -e "${RED}Security Error: Please run this script as root (sudo).${NC}"
-    exit 1
-fi
+function print_header() {
+    echo -e "${CYAN}================================================${NC}"
+    echo -e "${CYAN}      $1      ${NC}"
+    echo -e "${CYAN}================================================${NC}"
+}
 
-echo -e "${RED}================================================================${NC}"
-echo -e "${RED}WARNING: This will completely REMOVE WireGuard from this system!${NC}"
-echo -e "${RED}All configurations, keys, and client access will be destroyed.${NC}"
-echo -e "${RED}================================================================${NC}"
-echo -en "${PURPLE}Are you absolutely sure you want to proceed? [y/N]: ${NC}"
-read -r FLAG
+function isRoot() {
+    if [ "${EUID}" -ne 0 ]; then
+        echo "You need to run this script as root"
+        exit 1
+    fi
+}
 
-# Default to "No" for safety. Only proceed if user explicitly types y or Y.
-if [[ "$FLAG" =~ ^[Yy]$ ]]; then
-    echo -e "${GREEN}Starting removal process...${NC}"
+function checkOS() {
+    source /etc/os-release
+    OS="${ID}"
+    if [[ ${OS} == "debian" || ${OS} == "raspbian" ]]; then
+        OS=debian
+    elif [[ ${OS} == "ubuntu" ]]; then
+        OS=ubuntu
+    elif [[ ${OS} == "fedora" ]]; then
+        OS=fedora
+    elif [[ ${OS} == 'centos' ]] || [[ ${OS} == 'almalinux' ]] || [[ ${OS} == 'rocky' ]]; then
+        OS=centos
+    elif [[ -e /etc/oracle-release ]]; then
+        OS=oracle
+    elif [[ -e /etc/arch-release ]]; then
+        OS=arch
+    elif [[ -e /etc/alpine-release ]]; then
+        OS=alpine
+    else
+        echo "Unsupported OS."
+        exit 1
+    fi
+}
 
-    # 1. Safely shut down the service to prevent network hanging
-    if systemctl is-active --quiet wg-quick@wg0.service; then
-        echo -e "${GREEN}Stopping WireGuard service...${NC}"
-        systemctl stop wg-quick@wg0.service
-        systemctl disable wg-quick@wg0.service
+function uninstall_wireguard() {
+    print_header "Uninstall WireGuard"
+    echo -e "\n${RED}WARNING: This will completely remove WireGuard and DELETE all configuration files!${NC}"
+    echo -e "${ORANGE}It is highly recommended to use the Backup Manager first if you want to save your configs.${NC}"
+    
+    read -rp "Are you absolutely sure you want to remove WireGuard? [y/N]: " -e REMOVE
+    if [[ ! "$REMOVE" =~ ^[Yy]$ ]]; then
+        echo -e "\nRemoval aborted."
+        read -n1 -r -p "Press any key to continue..."
+        return
+    fi
+    
+    SERVER_WG_NIC="wg0"
+    if [[ -e /etc/wireguard/params ]]; then
+        source /etc/wireguard/params
     fi
 
-    # 2. Revert the IP forwarding vulnerability
-    echo -e "${GREEN}Reverting IP forwarding settings...${NC}"
-    sed -i '/net.ipv4.ip_forward=1/d' /etc/sysctl.conf
-    # Suppress output of sysctl to keep the terminal clean
-    sysctl -p &> /dev/null
+    echo -e "\n${CYAN}Stopping and disabling services...${NC}"
+    if [[ ${OS} == 'alpine' ]]; then
+        rc-service "wg-quick.${SERVER_WG_NIC}" stop 2>/dev/null
+        rc-update del "wg-quick.${SERVER_WG_NIC}" 2>/dev/null
+        unlink "/etc/init.d/wg-quick.${SERVER_WG_NIC}" 2>/dev/null
+        rc-update del sysctl 2>/dev/null
+    else
+        systemctl stop "wg-quick@${SERVER_WG_NIC}" 2>/dev/null
+        systemctl disable "wg-quick@${SERVER_WG_NIC}" 2>/dev/null
+    fi
 
-    # 3. Completely wipe the packages
-    echo -e "${GREEN}Uninstalling WireGuard...${NC}"
-    # Purge destroys the app configurations; autoremove cleans up unused dependencies
-    apt-get purge -y wireguard wireguard-tools
-    apt-get autoremove -y
+    echo -e "${CYAN}Removing packages...${NC}"
+    if [[ ${OS} == 'ubuntu' ]] || [[ ${OS} == 'debian' ]]; then
+        apt-get remove -y wireguard wireguard-tools qrencode
+    elif [[ ${OS} == 'fedora' ]]; then
+        dnf remove -y --noautoremove wireguard-tools qrencode
+    elif [[ ${OS} == 'centos' ]] || [[ ${OS} == 'almalinux' ]] || [[ ${OS} == 'rocky' ]]; then
+        yum remove -y --noautoremove wireguard-tools kmod-wireguard qrencode
+    elif [[ ${OS} == 'oracle' ]]; then
+        yum remove -y --noautoremove wireguard-tools qrencode
+    elif [[ ${OS} == 'arch' ]]; then
+        pacman -Rs --noconfirm wireguard-tools qrencode
+    elif [[ ${OS} == 'alpine' ]]; then
+        apk del wireguard-tools libqrencode libqrencode-tools
+    fi
 
-    # 4. Destroy the sensitive keys and configuration directory
-    echo -e "${GREEN}Deleting WireGuard keys and config directories...${NC}"
+    echo -e "${CYAN}Cleaning up files...${NC}"
     rm -rf /etc/wireguard
+    rm -f /etc/sysctl.d/wg.conf
+    rm -rf /root/easy_wireguard
 
-    echo -e "${PURPLE}Done! WireGuard has been completely removed from this system.${NC}"
-else
-    echo -e "${GREEN}Removal aborted. Your server was not modified.${NC}"
+    if [[ ${OS} != 'alpine' ]]; then
+        sysctl --system >/dev/null 2>&1
+    fi
+
+    echo -e "\n${GREEN}WireGuard has been successfully uninstalled.${NC}"
+    echo ""
+    read -n1 -r -p "Press any key to continue..."
+}
+
+isRoot
+checkOS
+
+# Allow running as a standalone script
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    uninstall_wireguard
 fi
