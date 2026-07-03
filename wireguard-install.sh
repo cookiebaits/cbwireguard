@@ -16,6 +16,49 @@ function installPackages() {
 	fi
 }
 
+function installWireguardGo() {
+	# Try to install wireguard-go from package manager, if it fails, compile it from source
+	if [[ ${OS} == 'ubuntu' ]] || [[ ${OS} == 'debian' && ${VERSION_ID} -gt 10 ]]; then
+		apt-get install -y wireguard-go || true
+	elif [[ ${OS} == 'debian' ]]; then
+		apt-get install -y -t buster-backports wireguard-go || true
+	elif [[ ${OS} == 'fedora' ]]; then
+		dnf install -y wireguard-go || true
+	elif [[ ${OS} == 'centos' ]] || [[ ${OS} == 'almalinux' ]] || [[ ${OS} == 'rocky' ]]; then
+		yum install -y wireguard-go || true
+	elif [[ ${OS} == 'oracle' ]]; then
+		dnf install -y wireguard-go || true
+	elif [[ ${OS} == 'arch' ]]; then
+		pacman -S --needed --noconfirm wireguard-go || true
+	elif [[ ${OS} == 'alpine' ]]; then
+		apk add wireguard-go || true
+	fi
+
+	# Fallback: if wireguard-go is still not installed, compile it from source
+	if ! command -v wireguard-go &>/dev/null; then
+		echo -e "${ORANGE}wireguard-go package not found. Compiling from source fallback...${NC}"
+
+		# Install build dependencies if missing
+		if ! command -v go &>/dev/null || ! command -v make &>/dev/null || ! command -v git &>/dev/null; then
+			if [[ ${OS} == 'ubuntu' ]] || [[ ${OS} == 'debian' ]]; then
+				apt-get install -y golang make git
+			elif [[ ${OS} == 'fedora' ]] || [[ ${OS} == 'centos' ]] || [[ ${OS} == 'almalinux' ]] || [[ ${OS} == 'rocky' ]] || [[ ${OS} == 'oracle' ]]; then
+				yum install -y golang make git
+			elif [[ ${OS} == 'arch' ]]; then
+				pacman -S --needed --noconfirm go make git
+			elif [[ ${OS} == 'alpine' ]]; then
+				apk add go make git
+			fi
+		fi
+
+		# Build wireguard-go
+		TEMP_DIR=$(mktemp -d)
+		git clone https://git.zx2c4.com/wireguard-go "$TEMP_DIR"
+		(cd "$TEMP_DIR" && make && mv wireguard-go /usr/local/bin/wireguard-go)
+		rm -rf "$TEMP_DIR"
+	fi
+}
+
 function isRoot() {
 	if [ "${EUID}" -ne 0 ]; then
 		echo "You need to run this script as root"
@@ -254,6 +297,8 @@ function installWireGuard() {
 		installPackages apk add wireguard-tools iptables libqrencode-tools
 	fi
 
+		installWireguardGo
+
 	# Verify WireGuard installation
 	if ! command -v wg &>/dev/null; then
 		echo -e "${RED}WireGuard installation failed. The 'wg' command was not found.${NC}"
@@ -348,6 +393,9 @@ net.ipv6.conf.all.forwarding = 1" >/etc/sysctl.d/wg.conf
 			echo -e "${ORANGE}You can check if WireGuard is running with: rc-service wg-quick.${SERVER_WG_NIC} status${NC}"
 		else
 			echo -e "${ORANGE}You can check if WireGuard is running with: systemctl status wg-quick@${SERVER_WG_NIC}${NC}"
+			echo -e "\n${RED}Recent Logs:${NC}"
+			systemctl status wg-quick@"${SERVER_WG_NIC}"
+			journalctl -u wg-quick@"${SERVER_WG_NIC}" --no-pager
 		fi
 		echo -e "${ORANGE}If you get something like \"Cannot find device ${SERVER_WG_NIC}\", please reboot!${NC}"
 	else # WireGuard is running
