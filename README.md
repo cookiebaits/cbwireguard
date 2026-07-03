@@ -25,24 +25,23 @@ wget https://raw.githubusercontent.com/cookiebaits/cbwireguard/main/easy_wiregua
 ### 1️⃣ Setup WireGuard Server (Option 1)
 Select your desired VPN port (stealthy ports like 443, 53, or 123 are recommended) and let the script handle the rest. You will also be prompted to install V2Ray for added stealth and streaming capabilities.
 
-### 2️⃣ Add New Client (Option 2)
-Enter a name for the device. The script will generate a configuration and display a QR code for easy mobile setup.
+### 2️⃣ Add New Client (Option 1 when installed)
+Enter a name for the device. The script will generate a configuration and display a QR code for easy mobile setup, then securely encrypt the configuration on the server.
 
-### 3️⃣ Configure Clients (Option 4)
+### 3️⃣ Configure Clients (Option 2)
 Manage existing clients:
-- **List:** View all configured peers.
-- **Check:** Display configuration text and QR codes.
+- **Check:** Display configuration text and QR codes by decrypting them on the fly.
 - **Edit:** Manually adjust client settings (MTU, DNS).
 - **Remove:** Safely delete a peer from the server.
 
-### 4️⃣ Backup & Restore (Option 5)
+### 4️⃣ Backup & Restore (Option 3)
 Keep your configurations safe. Backups are AES-256 encrypted with a password you provide.
 
-### 5️⃣ Domain-Based Split Tunneling (Option 6)
-Add domains (e.g., `netflix.com`) to a bypass list to route their traffic through your standard internet connection instead of the VPN.
+### 5️⃣ Domain-Based Split Tunneling & Settings (Option 4)
+Configure Default MTU and DNS, or add domains (e.g., `netflix.com`) to a bypass list to route their traffic through your standard internet connection instead of the VPN.
 
-### 6️⃣ V2Ray Stealth & Streaming (Option 7)
-Enable V2Ray to add an extra layer of obfuscation to your traffic. V2Ray is pre-configured to route major streaming services through a specified proxy, ensuring you can access content from anywhere.
+### 6️⃣ Remove WireGuard Server (Option 5)
+Completely removes WireGuard and all its configurations from the server.
 
 ---
 
@@ -50,6 +49,7 @@ Enable V2Ray to add an extra layer of obfuscation to your traffic. V2Ray is pre-
 - **No Activity Logging:** All scripts are configured to avoid logging user traffic.
 - **Encryption:** All sensitive configurations and backups are encrypted using OpenSSL with PBKDF2.
 - **Privileged Access:** Root access is required for network and service modifications.
+- **No Plaintext Leftovers:** Client configurations are generated, encrypted, and securely wiped using `shred`.
 
 ## 📄 License
 This project is licensed under the MIT License.

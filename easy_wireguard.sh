@@ -30,7 +30,7 @@ function main_menu() {
 
     while true; do
         print_header
-        
+
         if [[ -e /etc/wireguard/params ]]; then
             echo -e "Status: ${GREEN}Installed & Running${NC}"
             echo ""
@@ -41,10 +41,10 @@ function main_menu() {
             echo "   5) Remove WireGuard Server"
             echo "   0) Exit"
             echo ""
-            
+
             read -rp "Select an option [0-5]: " OPTION
             case "$OPTION" in
-                1) 
+                1)
                     # Use bash instead of sourcing to avoid re-running the install script's main menu
                     bash -c 'source ./wireguard-install.sh && newClient'
                     read -n1 -r -p "Press any key to continue..."
@@ -61,7 +61,7 @@ function main_menu() {
             echo "   1) Install WireGuard Server"
             echo "   0) Exit"
             echo ""
-            
+
             read -rp "Select an option [0-1]: " OPTION
             case "$OPTION" in
                 1) ./wireguard-install.sh ;;
