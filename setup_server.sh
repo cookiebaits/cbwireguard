@@ -20,8 +20,8 @@ if [[ -f "$SETTINGS_FILE" ]]; then
     source "$SETTINGS_FILE"
 fi
 
-# P3: Default MTU from settings or 1420
-MTU=${DEFAULT_MTU:-1420}
+# P3: Default MTU from settings or 1280
+MTU=${DEFAULT_MTU:-1280}
 
 if [[ "$EUID" -ne 0 ]]; then
     echo -e "${RED}Security Error: Please run this script as root (sudo).${NC}"
@@ -30,7 +30,7 @@ fi
 
 check_port_usage() {
     local port=$1
-    if ss -lnu | awk '{print $4}' | grep -q ":${port}$"; then
+    if ss -lnup | grep -q ":${port} "; then
         return 0 # Port is in use
     fi
     return 1 # Port is free
@@ -92,6 +92,7 @@ SERVER_PRIVATE_IP="10.18.0.1"
 SERVER_SUBNET="10.18.0.0/24"
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
+apt-get update -y
 apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq
 
 echo -e "${GREEN}Generating secure encryption keys...${NC}"
