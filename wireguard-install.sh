@@ -154,37 +154,11 @@ function installQuestions() {
 		read -rp "Server WireGuard IPv6: " -e -i fd42:42:42::1 SERVER_WG_IPV6
 	done
 
-	echo ""
-	echo "Select a WireGuard port:"
-	echo "   1) 51820 (Standard WireGuard)"
-	echo "   2) 53 (DNS - Stealthy)"
-	echo "   3) 123 (NTP - Stealthy)"
-	echo "   4) 443 (HTTPS - Stealthy/QUIC)"
-	echo "   5) 80 (HTTP - Stealthy)"
-	echo "   6) 1194 (OpenVPN Default - Stealthy)"
-	echo "   7) 3389 (RDP - Stealthy)"
-	echo "   8) 8080 (HTTP Alt - Stealthy)"
-	echo "   9) 8443 (HTTPS Alt - Stealthy)"
-	echo "   10) Custom / Random"
-
-	read -rp "Select an option [1-10]: " PORT_OPTION
-	case "${PORT_OPTION}" in
-		1) SERVER_PORT=51820 ;;
-		2) SERVER_PORT=53 ;;
-		3) SERVER_PORT=123 ;;
-		4) SERVER_PORT=443 ;;
-		5) SERVER_PORT=80 ;;
-		6) SERVER_PORT=1194 ;;
-		7) SERVER_PORT=3389 ;;
-		8) SERVER_PORT=8080 ;;
-		9) SERVER_PORT=8443 ;;
-		10|*)
-			RANDOM_PORT=$(shuf -i49152-65535 -n1)
-			until [[ ${SERVER_PORT} =~ ^[0-9]+$ ]] && [ "${SERVER_PORT}" -ge 1 ] && [ "${SERVER_PORT}" -le 65535 ]; do
-				read -rp "Server WireGuard port [1-65535]: " -e -i "${RANDOM_PORT}" SERVER_PORT
-			done
-		;;
-	esac
+	# Generate random number within private ports range
+	RANDOM_PORT=$(shuf -i49152-65535 -n1)
+	until [[ ${SERVER_PORT} =~ ^[0-9]+$ ]] && [ "${SERVER_PORT}" -ge 1 ] && [ "${SERVER_PORT}" -le 65535 ]; do
+		read -rp "Server WireGuard port [1-65535]: " -e -i "${RANDOM_PORT}" SERVER_PORT
+	done
 
 	# Cloudflare DNS by default
 	until [[ ${CLIENT_DNS_1} =~ ^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$ ]]; do
@@ -432,48 +406,22 @@ function newClient() {
 
 	HOME_DIR=$(getHomeDirForClient "${CLIENT_NAME}")
 
-	# Load overrides from Settings/Domain Bypass if they exist
-	SETTINGS_DIR="/root/easy_wireguard"
-	SETTINGS_CONF="${SETTINGS_DIR}/settings.conf"
-	CURRENT_ALLOWED_IPS="${SETTINGS_DIR}/current_allowed_ips.txt"
-
-	CLIENT_CONF_DNS_1=${CLIENT_DNS_1}
-	CLIENT_CONF_DNS_2=${CLIENT_DNS_2}
-	CLIENT_CONF_MTU="# MTU = 1420"
-	CLIENT_CONF_ALLOWED_IPS=${ALLOWED_IPS}
-
-	if [[ -f "$SETTINGS_CONF" ]]; then
-		# Parse settings.conf safely
-		while IFS='=' read -r key value; do
-			if [[ "$key" == "MTU" ]]; then
-				CLIENT_CONF_MTU="MTU = ${value}"
-			elif [[ "$key" == "DNS1" ]]; then
-				CLIENT_CONF_DNS_1="${value}"
-			elif [[ "$key" == "DNS2" ]]; then
-				CLIENT_CONF_DNS_2="${value}"
-			fi
-		done < "$SETTINGS_CONF"
-	fi
-
-	if [[ -f "$CURRENT_ALLOWED_IPS" ]]; then
-		CALC_IPS=$(cat "$CURRENT_ALLOWED_IPS" | tr -d '\n')
-		if [[ -n "$CALC_IPS" ]]; then
-			CLIENT_CONF_ALLOWED_IPS="$CALC_IPS"
-		fi
-	fi
-
 	# Create client file and add the server as a peer
 	echo "[Interface]
 PrivateKey = ${CLIENT_PRIV_KEY}
 Address = ${CLIENT_WG_IPV4}/32,${CLIENT_WG_IPV6}/128
-DNS = ${CLIENT_CONF_DNS_1},${CLIENT_CONF_DNS_2}
-${CLIENT_CONF_MTU}
+DNS = ${CLIENT_DNS_1},${CLIENT_DNS_2}
+
+# Uncomment the next line to set a custom MTU
+# This might impact performance, so use it only if you know what you are doing
+# See https://github.com/nitred/nr-wg-mtu-finder to find your optimal MTU
+# MTU = 1420
 
 [Peer]
 PublicKey = ${SERVER_PUB_KEY}
 PresharedKey = ${CLIENT_PRE_SHARED_KEY}
 Endpoint = ${ENDPOINT}
-AllowedIPs = ${CLIENT_CONF_ALLOWED_IPS}" >"${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf"
+AllowedIPs = ${ALLOWED_IPS}" >"${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf"
 
 	# Add the client as a peer to the server
 	echo -e "\n### Client ${CLIENT_NAME}
@@ -491,23 +439,7 @@ AllowedIPs = ${CLIENT_WG_IPV4}/32,${CLIENT_WG_IPV6}/128" >>"/etc/wireguard/${SER
 		echo ""
 	fi
 
-	echo -e "${GREEN}Your client config file is temporarily in ${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf${NC}"
-
-	# Encrypt configuration for safety
-	echo -e "\n${ORANGE}For security, we will encrypt your client configuration file.${NC}"
-	echo -e "${ORANGE}Please provide a password. You will need this password to view or edit the config later.${NC}"
-
-	mkdir -p /etc/wireguard/clients
-	ENC_FILE="/etc/wireguard/clients/${CLIENT_NAME}.conf.enc"
-
-	openssl enc -aes-256-cbc -salt -pbkdf2 -in "${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf" -out "$ENC_FILE"
-	if [[ $? -eq 0 ]]; then
-		shred -u "${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf" 2>/dev/null || rm -f "${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf"
-		echo -e "${GREEN}Configuration securely encrypted and saved to $ENC_FILE${NC}"
-		echo -e "${ORANGE}The plain-text file has been securely deleted.${NC}"
-	else
-		echo -e "${RED}Failed to encrypt configuration! The plain-text file remains at ${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf${NC}"
-	fi
+	echo -e "${GREEN}Your client config file is in ${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf${NC}"
 }
 
 function listClients() {
@@ -660,13 +592,10 @@ function manageMenu() {
 # Check for root, virt, OS...
 initialCheck
 
-# Allow sourcing the script for external wrappers like easy_wireguard.sh without executing the menu automatically
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-	# Check if WireGuard is already installed and load params
-	if [[ -e /etc/wireguard/params ]]; then
-		source /etc/wireguard/params
-		manageMenu
-	else
-		installWireGuard
-	fi
+# Check if WireGuard is already installed and load params
+if [[ -e /etc/wireguard/params ]]; then
+	source /etc/wireguard/params
+	manageMenu
+else
+	installWireGuard
 fi
