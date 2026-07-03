@@ -67,7 +67,9 @@ show_user() {
     unset MASTER_PASS
     list_users || return
     echo -en "${GREEN}Enter username to view: ${NC}"
-    read -r username
+    read -r raw_username
+    local username
+    username=$(echo "$raw_username" | tr -cd '[:alnum:]_-')
     local file="${CLIENT_DIR}/${username}.conf.enc"
 
     if [[ -f "$file" ]]; then
@@ -93,7 +95,9 @@ delete_user() {
     unset MASTER_PASS
     list_users || return
     echo -en "${RED}Enter username to DELETE: ${NC}"
-    read -r username
+    read -r raw_username
+    local username
+    username=$(echo "$raw_username" | tr -cd '[:alnum:]_-')
     local file="${CLIENT_DIR}/${username}.conf.enc"
 
     if [[ -f "$file" ]]; then
@@ -127,7 +131,9 @@ edit_user() {
     unset MASTER_PASS
     list_users || return
     echo -en "${GREEN}Enter username to EDIT: ${NC}"
-    read -r username
+    read -r raw_username
+    local username
+    username=$(echo "$raw_username" | tr -cd '[:alnum:]_-')
     local file="${CLIENT_DIR}/${username}.conf.enc"
 
     if [[ -f "$file" ]]; then
@@ -159,7 +165,9 @@ edit_user() {
 
 show_user_by_name() {
     unset MASTER_PASS
-    local username="$1"
+    local raw_username="$1"
+    local username
+    username=$(echo "$raw_username" | tr -cd '[:alnum:]_-')
     local file="${CLIENT_DIR}/${username}.conf.enc"
 
     if [[ -f "$file" ]]; then
