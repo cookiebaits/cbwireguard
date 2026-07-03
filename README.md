@@ -34,7 +34,7 @@ This wrapper dynamically pulls the latest scripts from GitHub, ensuring your ser
 Run this single command to download and launch the installer:
 
 ```bash
-curl -sSfL https://raw.githubusercontent.com/cookiebaits/cbwireguard/main/easy_wireguard.sh -o easy_wireguard.sh && chmod +x easy_wireguard.sh && sudo ./easy_wireguard.sh
+curl -sSfL https://raw.githubusercontent.com/cookiebaits/cbwireguard/main/easy_wg.sh -o easy_wg.sh && chmod +x easy_wg.sh && sudo ./easy_wg.sh
 ```
 
 ---
