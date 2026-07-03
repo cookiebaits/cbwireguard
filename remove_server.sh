@@ -48,14 +48,14 @@ function uninstall_wireguard() {
     print_header "Uninstall WireGuard"
     echo -e "\n${RED}WARNING: This will completely remove WireGuard and DELETE all configuration files!${NC}"
     echo -e "${ORANGE}It is highly recommended to use the Backup Manager first if you want to save your configs.${NC}"
-
+    
     read -rp "Are you absolutely sure you want to remove WireGuard? [y/N]: " -e REMOVE
     if [[ ! "$REMOVE" =~ ^[Yy]$ ]]; then
         echo -e "\nRemoval aborted."
         read -n1 -r -p "Press any key to continue..."
         return
     fi
-
+    
     SERVER_WG_NIC="wg0"
     if [[ -e /etc/wireguard/params ]]; then
         source /etc/wireguard/params

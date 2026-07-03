@@ -26,7 +26,7 @@ function print_header() {
 
 function calculate_allowed_ips() {
     echo -e "${CYAN}Calculating AllowedIPs based on bypassed domains...${NC}"
-
+    
     # Python script to generate AllowedIPs excluding the bypassed domains
     TEMP_SCRIPT=$(mktemp)
     cat << 'EOF' > "$TEMP_SCRIPT"
@@ -77,7 +77,7 @@ allowed_v6 = [str(n) for n in networks_v6]
 
 print(",".join(allowed_v4 + allowed_v6))
 EOF
-
+    
     DOMAINS=$(cat "$DOMAIN_LIST" | tr '\n' ' ')
     if [[ -z $(echo "$DOMAINS" | tr -d ' ') ]]; then
         NEW_ALLOWED_IPS="0.0.0.0/0,::/0"
@@ -87,16 +87,16 @@ EOF
             NEW_ALLOWED_IPS="0.0.0.0/0,::/0"
         fi
     fi
-
+    
     rm -f "$TEMP_SCRIPT"
-
+    
     # Save the base AllowedIPs setting
     echo "$NEW_ALLOWED_IPS" > "${SETTINGS_DIR}/current_allowed_ips.txt"
-
-    # Note: This logic computes the IPs but we don't automatically rewrite all client configs
+    
+    # Note: This logic computes the IPs but we don't automatically rewrite all client configs 
     # since they are encrypted. We just store it so newly generated clients use it.
     # To apply to existing, users must edit them manually via the Client Manager.
-
+    
     echo -e "${GREEN}AllowedIPs calculated successfully.${NC}"
     echo -e "New clients will use this split-tunneling configuration."
     echo -e "${ORANGE}Note: Existing clients must be regenerated or edited manually to apply changes.${NC}"
@@ -117,7 +117,7 @@ function add_domain() {
     print_header "Add Domain to Bypass"
     echo -e "Enter the domain you want to bypass the VPN (e.g., netflix.com)"
     read -rp "Domain: " NEW_DOMAIN
-
+    
     if [[ -n "$NEW_DOMAIN" ]]; then
         echo "$NEW_DOMAIN" >> "$DOMAIN_LIST"
         echo -e "${GREEN}Added $NEW_DOMAIN to bypass list.${NC}"
@@ -133,11 +133,11 @@ function remove_domain() {
         read -n1 -r -p "Press any key to continue..."
         return
     fi
-
+    
     cat -n "$DOMAIN_LIST"
     echo ""
     read -rp "Enter the number of the domain to remove (0 to cancel): " DOMAIN_NUM
-
+    
     if [[ "$DOMAIN_NUM" =~ ^[0-9]+$ && "$DOMAIN_NUM" -gt 0 ]]; then
         TOTAL_DOMAINS=$(wc -l < "$DOMAIN_LIST")
         if [[ "$DOMAIN_NUM" -le "$TOTAL_DOMAINS" ]]; then
@@ -162,9 +162,9 @@ function settings_menu() {
     while true; do
         clear
         print_header "Settings & Split Tunneling"
-
+        
         source "$SETTINGS_CONF"
-
+        
         echo -e "Current Default MTU: ${CYAN}${MTU}${NC}"
         echo -e "Current Default DNS: ${CYAN}${DNS1}, ${DNS2}${NC}"
         echo ""
@@ -176,7 +176,7 @@ function settings_menu() {
         echo "   6) Force Recalculate AllowedIPs"
         echo "   7) Exit to Main Menu"
         echo ""
-
+        
         read -rp "Select an option [1-7]: " OPTION
         case "$OPTION" in
             1)
