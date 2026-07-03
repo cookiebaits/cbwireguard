@@ -20,8 +20,8 @@ if [[ -f "$SETTINGS_FILE" ]]; then
     source "$SETTINGS_FILE"
 fi
 
-# P3: Default MTU from settings or 1420
-MTU=${DEFAULT_MTU:-1420}
+# P3: Default MTU from settings or 1280
+MTU=${DEFAULT_MTU:-1280}
 
 if [[ "$EUID" -ne 0 ]]; then
     echo -e "${RED}Security Error: Please run this script as root (sudo).${NC}"
@@ -36,13 +36,24 @@ check_port_usage() {
     return 1 # Port is free
 }
 
-echo -e "${GREEN}Choose port for VPN:${NC}"
-echo "[1] 443"
-echo "[2] 53 (DNS)"
-echo "[3] 123 (NTP)"
-echo "[4] 1194 (OpenVPN UDP)"
-echo "[5] 500 (ISAKMP)"
-echo "[6] 4500 (IPsec NAT-T)"
+print_banner() {
+    echo -e "${PURPLE}======================================================${NC}"
+    echo -e "${GREEN}       🍪 Cookie's WireGuard Server Setup${NC}"
+    echo -e "${PURPLE}======================================================${NC}"
+}
+
+clear
+print_banner
+echo -e "${PURPLE}┌────────────────────────────────────────────────────┐${NC}"
+echo -e "${PURPLE}│      VPN Port Selection (Recommended Stealthy)     │${NC}"
+echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
+echo -e "${PURPLE}│ ${NC}[1] 443 (HTTPS/QUIC - Most Stealthy)             ${PURPLE}│${NC}"
+echo -e "${PURPLE}│ ${NC}[2] 53 (DNS)                                     ${PURPLE}│${NC}"
+echo -e "${PURPLE}│ ${NC}[3] 123 (NTP)                                    ${PURPLE}│${NC}"
+echo -e "${PURPLE}│ ${NC}[4] 1194 (OpenVPN UDP)                           ${PURPLE}│${NC}"
+echo -e "${PURPLE}│ ${NC}[5] 500 (ISAKMP)                                  ${PURPLE}│${NC}"
+echo -e "${PURPLE}│ ${NC}[6] 4500 (IPsec NAT-T)                            ${PURPLE}│${NC}"
+echo -e "${PURPLE}└────────────────────────────────────────────────────┘${NC}"
 echo -en "${PURPLE}Select option [1-6] or enter custom port [Default 443]: ${NC}"
 read -r input_VPN_PORT
 
@@ -88,10 +99,31 @@ if [[ -n "$input_MTU" ]]; then
     MTU="$input_MTU"
 fi
 
+set_sysctl() {
+    local key="$1"
+    local value="$2"
+    if grep -q "^${key}=" /etc/sysctl.conf 2>/dev/null; then
+        sed -i "s|^${key}=.*|${key}=${value}|" /etc/sysctl.conf
+    else
+        echo "${key}=${value}" >> /etc/sysctl.conf
+    fi
+}
+
 SERVER_PRIVATE_IP="10.18.0.1"
-SERVER_SUBNET="10.18.0.0/24"
+
+# P1: Cleanup old instances before fresh install
+echo -e "${GREEN}Cleaning up any existing WireGuard instances...${NC}"
+if systemctl is-active --quiet wg-quick@wg0.service; then
+    systemctl stop wg-quick@wg0.service
+    systemctl disable wg-quick@wg0.service
+fi
+sed -i '/net.ipv4.ip_forward=1/d' /etc/sysctl.conf
+apt-get purge -y wireguard wireguard-tools >/dev/null 2>&1 || true
+apt-get autoremove -y >/dev/null 2>&1 || true
+rm -rf /etc/wireguard
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
+# P2: Removed apt-get update
 apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq
 
 echo -e "${GREEN}Generating secure encryption keys...${NC}"
@@ -105,7 +137,11 @@ echo "$SERVER_PRIVATE" > /etc/wireguard/server_private.key
 echo "$SERVER_PUBLIC" > /etc/wireguard/server_public.key
 chmod 600 /etc/wireguard/server_*.key
 
-NETWORK_DEVICE=$(ip route get 8.8.8.8 | grep -Po '(?<=dev )(\S+)' | head -1)
+# P1: Enhanced network device detection
+NETWORK_DEVICE=$(ip route get 8.8.8.8 2>/dev/null | grep -Po '(?<=dev )(\S+)' | head -1)
+if [[ -z "$NETWORK_DEVICE" ]]; then
+    NETWORK_DEVICE=$(ip -o link show | awk -F': ' '{print $2}' | grep -vE 'lo|wg' | head -n1)
+fi
 
 echo -e "${GREEN}Configuring WireGuard interface (wg0)...${NC}"
 cat <<EOF > /etc/wireguard/wg0.conf
@@ -116,39 +152,28 @@ ListenPort = $PORT
 MTU = $MTU
 SaveConfig = false
 
--PostUp = iptables -A FORWARD -i wg0 -j ACCEPT
--PostUp = iptables -A FORWARD -o wg0 -j ACCEPT
-+PostUp = iptables -I FORWARD 1 -i wg0 -j ACCEPT
-+PostUp = iptables -I FORWARD 1 -o wg0 -j ACCEPT
- PostUp = iptables -t nat -A POSTROUTING -s $SERVER_SUBNET -o $NETWORK_DEVICE -j MASQUERADE
--PostUp = iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-+PostUp = iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
- PreDown = iptables -D FORWARD -i wg0 -j ACCEPT
- PreDown = iptables -D FORWARD -o wg0 -j ACCEPT
- PreDown = iptables -t nat -D POSTROUTING -s $SERVER_SUBNET -o $NETWORK_DEVICE -j MASQUERADE
- PreDown = iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+PostUp = ufw route allow in on wg0 out on $NETWORK_DEVICE
+PostUp = iptables -t nat -A POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
+PreDown = ufw route delete allow in on wg0 out on $NETWORK_DEVICE
+PreDown = iptables -t nat -D POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
 EOF
 
 chmod 600 /etc/wireguard/wg0.conf
 
-echo -e "${GREEN}Optimizing Network Throughput (BBR & Forwarding)...${NC}"
-sed -i '/net.ipv4.ip_forward/d' /etc/sysctl.conf
-sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
-sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.all.rp_filter/d' /etc/sysctl.conf
-sed -i '/net.ipv4.conf.default.rp_filter/d' /etc/sysctl.conf
-
-echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
-echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
-# P2: Harden network stack (using loose mode to prevent routing drops)
-echo "net.ipv4.conf.all.rp_filter=2" >> /etc/sysctl.conf
-echo "net.ipv4.conf.default.rp_filter=2" >> /etc/sysctl.conf
+echo -e "${GREEN}Optimizing Network & Hardening Security...${NC}"
+set_sysctl "net.ipv4.ip_forward" "1"
+set_sysctl "net.core.default_qdisc" "fq"
+set_sysctl "net.ipv4.tcp_congestion_control" "bbr"
+# Security Hardening
+set_sysctl "net.ipv4.conf.all.rp_filter" "1"
+set_sysctl "net.ipv4.conf.default.rp_filter" "1"
+set_sysctl "net.ipv4.conf.all.accept_redirects" "0"
+set_sysctl "net.ipv4.conf.all.send_redirects" "0"
+set_sysctl "net.ipv4.conf.all.accept_source_route" "0"
+set_sysctl "net.ipv6.conf.all.disable_ipv6" "0"
 sysctl -p
 
 echo -e "${GREEN}Configuring UFW Firewall...${NC}"
-sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw || true
-sed -i 's/#net\/ipv4\/ip_forward=1/net\/ipv4\/ip_forward=1/' /etc/ufw/sysctl.conf || true
 ufw allow "$PORT/udp"
 ufw allow "$SSH_PORT/tcp"
 ufw --force enable
