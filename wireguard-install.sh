@@ -166,7 +166,7 @@ function installQuestions() {
 	echo "   8) 8080 (HTTP Alt - Stealthy)"
 	echo "   9) 8443 (HTTPS Alt - Stealthy)"
 	echo "   10) Custom / Random"
-	
+
 	read -rp "Select an option [1-10]: " PORT_OPTION
 	case "${PORT_OPTION}" in
 		1) SERVER_PORT=51820 ;;
@@ -178,7 +178,7 @@ function installQuestions() {
 		7) SERVER_PORT=3389 ;;
 		8) SERVER_PORT=8080 ;;
 		9) SERVER_PORT=8443 ;;
-		10|*) 
+		10|*)
 			RANDOM_PORT=$(shuf -i49152-65535 -n1)
 			until [[ ${SERVER_PORT} =~ ^[0-9]+$ ]] && [ "${SERVER_PORT}" -ge 1 ] && [ "${SERVER_PORT}" -le 65535 ]; do
 				read -rp "Server WireGuard port [1-65535]: " -e -i "${RANDOM_PORT}" SERVER_PORT
@@ -431,12 +431,12 @@ function newClient() {
 	CLIENT_PRE_SHARED_KEY=$(wg genpsk)
 
 	HOME_DIR=$(getHomeDirForClient "${CLIENT_NAME}")
-	
+
 	# Load overrides from Settings/Domain Bypass if they exist
 	SETTINGS_DIR="/root/easy_wireguard"
 	SETTINGS_CONF="${SETTINGS_DIR}/settings.conf"
 	CURRENT_ALLOWED_IPS="${SETTINGS_DIR}/current_allowed_ips.txt"
-	
+
 	CLIENT_CONF_DNS_1=${CLIENT_DNS_1}
 	CLIENT_CONF_DNS_2=${CLIENT_DNS_2}
 	CLIENT_CONF_MTU="# MTU = 1420"
@@ -492,14 +492,14 @@ AllowedIPs = ${CLIENT_WG_IPV4}/32,${CLIENT_WG_IPV6}/128" >>"/etc/wireguard/${SER
 	fi
 
 	echo -e "${GREEN}Your client config file is temporarily in ${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf${NC}"
-	
+
 	# Encrypt configuration for safety
 	echo -e "\n${ORANGE}For security, we will encrypt your client configuration file.${NC}"
 	echo -e "${ORANGE}Please provide a password. You will need this password to view or edit the config later.${NC}"
-	
+
 	mkdir -p /etc/wireguard/clients
 	ENC_FILE="/etc/wireguard/clients/${CLIENT_NAME}.conf.enc"
-	
+
 	openssl enc -aes-256-cbc -salt -pbkdf2 -in "${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf" -out "$ENC_FILE"
 	if [[ $? -eq 0 ]]; then
 		shred -u "${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf" 2>/dev/null || rm -f "${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf"
