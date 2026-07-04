@@ -113,6 +113,10 @@ SERVER_PRIVATE_IP="10.18.0.1"
 
 # P1: Cleanup old instances before fresh install
 echo -e "${GREEN}Cleaning up any existing WireGuard instances...${NC}"
+for svc in $(systemctl list-units --type=service --state=active | grep -o "wg-quick@.*\.service"); do
+    systemctl stop "$svc"
+    systemctl disable "$svc"
+done
 if systemctl is-active --quiet wg-quick@wg0.service; then
     systemctl stop wg-quick@wg0.service
     systemctl disable wg-quick@wg0.service
@@ -121,6 +125,7 @@ sed -i '/net.ipv4.ip_forward=1/d' /etc/sysctl.conf
 apt-get purge -y wireguard wireguard-tools >/dev/null 2>&1 || true
 apt-get autoremove -y >/dev/null 2>&1 || true
 rm -rf /etc/wireguard
+rm -rf /root/easy_wireguard/clients 2>/dev/null || true
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
 # P2: Removed apt-get update
