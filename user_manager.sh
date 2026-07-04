@@ -34,14 +34,14 @@ get_master_pass() {
 encrypt_file() {
     local file="$1"
     get_master_pass
-    openssl enc -aes-256-cbc -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "$file" -out "${file}.enc"
+    openssl enc -aes-256-cbc -salt -pbkdf2 -pass env:MASTER_PASS -in "$file" -out "${file}.enc"
     rm -f "$file"
 }
 
 decrypt_file_to_stdout() {
     local file="$1"
     get_master_pass
-    if ! openssl enc -aes-256-cbc -d -salt -pbkdf2 -pass "pass:$MASTER_PASS" -in "$file" 2>/dev/null; then
+    if ! openssl enc -aes-256-cbc -d -salt -pbkdf2 -pass env:MASTER_PASS -in "$file" 2>/dev/null; then
         unset MASTER_PASS
         echo "FAILED"
     fi
@@ -67,7 +67,9 @@ show_user() {
     unset MASTER_PASS
     list_users || return
     echo -en "${GREEN}Enter username to view: ${NC}"
-    read -r username
+    read -r raw_username
+    local username
+    username=$(echo "$raw_username" | tr -cd '[:alnum:]_-')
     local file="${CLIENT_DIR}/${username}.conf.enc"
 
     if [[ -f "$file" ]]; then
@@ -93,7 +95,9 @@ delete_user() {
     unset MASTER_PASS
     list_users || return
     echo -en "${RED}Enter username to DELETE: ${NC}"
-    read -r username
+    read -r raw_username
+    local username
+    username=$(echo "$raw_username" | tr -cd '[:alnum:]_-')
     local file="${CLIENT_DIR}/${username}.conf.enc"
 
     if [[ -f "$file" ]]; then
@@ -127,7 +131,9 @@ edit_user() {
     unset MASTER_PASS
     list_users || return
     echo -en "${GREEN}Enter username to EDIT: ${NC}"
-    read -r username
+    read -r raw_username
+    local username
+    username=$(echo "$raw_username" | tr -cd '[:alnum:]_-')
     local file="${CLIENT_DIR}/${username}.conf.enc"
 
     if [[ -f "$file" ]]; then
@@ -159,7 +165,9 @@ edit_user() {
 
 show_user_by_name() {
     unset MASTER_PASS
-    local username="$1"
+    local raw_username="$1"
+    local username
+    username=$(echo "$raw_username" | tr -cd '[:alnum:]_-')
     local file="${CLIENT_DIR}/${username}.conf.enc"
 
     if [[ -f "$file" ]]; then

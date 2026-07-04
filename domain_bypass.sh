@@ -47,7 +47,8 @@ update_routes() {
 
 add_domain() {
     echo -en "${GREEN}Enter domain to bypass (e.g., netflix.com): ${NC}"
-    read -r domain
+    read -r raw_domain
+    domain=$(echo "$raw_domain" | tr -cd '[:alnum:]_.-')
     if [[ -n "$domain" ]]; then
         if grep -Fxq "$domain" "$BYPASS_FILE"; then
             echo -e "${PURPLE}Domain already in bypass list.${NC}"
