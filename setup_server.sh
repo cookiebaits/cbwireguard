@@ -99,6 +99,16 @@ if [[ -n "$input_MTU" ]]; then
     MTU="$input_MTU"
 fi
 
+echo -en "${GREEN}Do you want to add a domain exemption for split tunneling? Enter domain or leave blank to skip: ${NC}"
+read -r input_BYPASS
+if [[ -n "$input_BYPASS" ]]; then
+    mkdir -p /etc/wireguard
+    echo "$input_BYPASS" >> /etc/wireguard/bypass_domains.txt
+    HAS_BYPASS=true
+else
+    HAS_BYPASS=false
+fi
+
 set_sysctl() {
     local key="$1"
     local value="$2"
@@ -133,7 +143,7 @@ rm -rf /root/easy_wireguard/clients 2>/dev/null || true
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
 # P2: Removed apt-get update
-apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq
+apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq python3
 
 echo -e "${GREEN}Generating secure encryption keys...${NC}"
 mkdir -p /etc/wireguard
@@ -198,6 +208,12 @@ if ! systemctl restart wg-quick@wg0.service; then
     exit 1
 fi
 systemctl status --no-pager -l wg-quick@wg0.service
+
+if [[ "$HAS_BYPASS" == "true" && -f /root/easy_wireguard/domain_bypass.sh ]]; then
+    echo -e "${GREEN}Calculating Split Tunneling AllowedIPs...${NC}"
+    # Execute update_routes function or similar from domain_bypass.sh non-interactively
+    bash /root/easy_wireguard/domain_bypass.sh --cli-update || true
+fi
 
 echo -e "\n${PURPLE}======================================================${NC}"
 echo -e "${GREEN}Server Setup Complete!${NC}"
