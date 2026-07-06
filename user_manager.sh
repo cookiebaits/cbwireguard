@@ -34,6 +34,7 @@ get_master_pass() {
 encrypt_file() {
     local file="$1"
     get_master_pass
+    export MASTER_PASS
     openssl enc -aes-256-cbc -salt -pbkdf2 -pass env:MASTER_PASS -in "$file" -out "${file}.enc"
     rm -f "$file"
 }
@@ -41,6 +42,7 @@ encrypt_file() {
 decrypt_file_to_stdout() {
     local file="$1"
     get_master_pass
+    export MASTER_PASS
     if ! openssl enc -aes-256-cbc -d -salt -pbkdf2 -pass env:MASTER_PASS -in "$file" 2>/dev/null; then
         unset MASTER_PASS
         echo "FAILED"

@@ -126,6 +126,7 @@ get_master_pass() {
 
 encrypt_config() {
     get_master_pass
+    export MASTER_PASS
     openssl enc -aes-256-cbc -salt -pbkdf2 -pass env:MASTER_PASS -in "$CLIENT_CONF" -out "${CLIENT_CONF}.enc"
     # Keep the plain text for the current display, then delete
 }

@@ -34,10 +34,13 @@ if [[ "$FLAG" =~ ^[Yy]$ ]]; then
 
     # 1. Safely shut down the service to prevent network hanging
     echo -e "${GREEN}Stopping WireGuard services...${NC}"
-    for svc in $(systemctl list-units --type=service --state=active | grep -o "wg-quick@.*\.service"); do
-        systemctl stop "$svc"
-        systemctl disable "$svc"
-    done
+    active_wg_services=$(systemctl list-units --type=service --state=active | grep -o "wg-quick@.*\.service" || true)
+    if [[ -n "$active_wg_services" ]]; then
+        for svc in $active_wg_services; do
+            systemctl stop "$svc"
+            systemctl disable "$svc"
+        done
+    fi
     if systemctl is-active --quiet wg-quick@wg0.service; then
         systemctl stop wg-quick@wg0.service
         systemctl disable wg-quick@wg0.service
@@ -52,8 +55,9 @@ if [[ "$FLAG" =~ ^[Yy]$ ]]; then
     # 3. Completely wipe the packages
     echo -e "${GREEN}Uninstalling WireGuard...${NC}"
     # Purge destroys the app configurations; autoremove cleans up unused dependencies
-    apt-get purge -y wireguard wireguard-tools wireguard-dkms wireguard-go qrencode 2>/dev/null || true
-    apt-get autoremove -y 2>/dev/null || true
+    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 1; done
+    apt-get purge -y wireguard wireguard-tools wireguard-dkms wireguard-go qrencode >/dev/null 2>&1 || true
+    apt-get autoremove -y >/dev/null 2>&1 || true
 
     # 4. Destroy the sensitive keys and configuration directory
     echo -e "${GREEN}Deleting WireGuard keys and config directories...${NC}"
