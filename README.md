@@ -22,7 +22,7 @@ This wrapper dynamically pulls the latest scripts from GitHub, ensuring your ser
 - **Enhanced Stealth & Bypassing:** Dynamically configure MTU, DNS, and AllowedIPs (split-tunneling) to bypass streaming service detection and restrictive firewalls.
 - **Domain-Based Split Tunneling:** Bypass specific domains from the VPN tunnel in real-time.
 - **Hardened Security & Sanitization:** Inputs are strictly sanitized to prevent injection attacks, and sensitive cryptographic operations are protected from process list monitoring.
-- **Maximized Throughput:** Injects Kernel-level BBR (Bottleneck Bandwidth and RTT) and FQ queueing, paired with an optimized default MTU (1280) to eliminate packet fragmentation and maximize speeds.
+- **Maximized Throughput:** Injects Kernel-level BBR (Bottleneck Bandwidth and RTT) and FQ queueing, paired with an optimized default MTU (1420) to eliminate packet fragmentation and maximize speeds.
 - **Zero-Downtime Hot Reloading:** Adding a new peer instantly injects them into the live server. Existing users are never disconnected when the configuration updates.
 - **Military-Grade Security:** Enforces strict execution rules (`set -euo pipefail`), root-only directory locks (`chmod 700`), and secure unprivileged port generation.
 - **Encrypted Backups:** All backups are now AES-256 encrypted using OpenSSL.
@@ -77,7 +77,7 @@ Delete: Securely destroys backup archives to keep your server secure.
 
 ## ⚙️ Step 6: Customizing Defaults (Option s)
 You can now customize global defaults for all future clients:
-- **Default MTU:** Request specifically set to 1280 to bypass MTU-based detection.
+- **Default MTU:** Request specifically set to 1420 to bypass MTU-based detection.
 - **Default DNS:** Set to a high-privacy, ad-blocking DNS cluster.
 - **Default Allowed IPs:** Configured as `0.0.0.0/1, 128.0.0.0/1` by default to increase stealth.
 

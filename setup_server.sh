@@ -20,8 +20,8 @@ if [[ -f "$SETTINGS_FILE" ]]; then
     source "$SETTINGS_FILE"
 fi
 
-# P3: Default MTU from settings or 1280
-MTU=${DEFAULT_MTU:-1280}
+# P3: Default MTU from settings or 1420
+MTU=${DEFAULT_MTU:-1420}
 
 if [[ "$EUID" -ne 0 ]]; then
     echo -e "${RED}Security Error: Please run this script as root (sudo).${NC}"
@@ -133,7 +133,7 @@ rm -rf /root/easy_wireguard/clients 2>/dev/null || true
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
 # P2: Removed apt-get update
-apt-get update -y && apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq
+apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq
 
 echo -e "${GREEN}Generating secure encryption keys...${NC}"
 mkdir -p /etc/wireguard
