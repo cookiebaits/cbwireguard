@@ -16,33 +16,131 @@ fi
 
 init_bypass() {
     if [[ ! -f "$BYPASS_FILE" ]]; then
+        mkdir -p /etc/wireguard
         touch "$BYPASS_FILE"
         chmod 600 "$BYPASS_FILE"
     fi
 }
 
-get_default_gateway() {
-    ip route show default | awk '/default/ {print $3}' | head -n 1
+update_routes() {
+    echo -e "${GREEN}Calculating Split Tunneling AllowedIPs...${NC}"
+    cat << 'PY_CALC_EOF' | python3
+import ipaddress
+import socket
+import sys
+import glob
+import re
+
+SERVICE_MAP = {
+    "disneyplus.com": ["disneyplus.com", "bamgrid.com", "dssott.com", "disney-plus.net", "disneystreaming.com", "cdn.registerdisney.go.com"],
+    "netflix.com": ["netflix.com", "netflix.net", "nflximg.net", "nflxext.com", "nflxso.net", "nflxvideo.net"],
+    "hulu.com": ["hulu.com", "huluim.com", "hulustream.com"],
+    "primevideo.com": ["primevideo.com", "amazonvideo.com", "aiv-cdn.net", "aiv-delivery.net"],
+    "amazon.com": ["primevideo.com", "amazonvideo.com", "aiv-cdn.net", "aiv-delivery.net", "amazon.com"],
+    "max.com": ["max.com", "hbomax.com", "hbomaxcdn.com"],
+    "chatgpt.com": ["chatgpt.com", "openai.com", "auth0.com"],
+    "openai.com": ["chatgpt.com", "openai.com", "auth0.com"],
+    "ticketmaster.com": ["ticketmaster.com", "livenation.com"],
+    "chase.com": ["chase.com"],
+    "bankofamerica.com": ["bankofamerica.com", "bofa.com"]
 }
 
-update_routes() {
-    local gateway
-    gateway=$(get_default_gateway)
-    if [[ -z "$gateway" ]]; then
-        echo -e "${RED}Error: Default gateway not found.${NC}"
-        return 1
-    fi
+def resolve_domain(domain):
+    try:
+        _, _, ips = socket.gethostbyname_ex(domain)
+        return ips
+    except Exception:
+        return []
 
-    echo -e "${GREEN}Updating routing table...${NC}"
-    while IFS= read -r domain; do
-        [[ -z "$domain" || "$domain" =~ ^# ]] && continue
-        echo -e "Resolving ${PURPLE}${domain}${NC}..."
-        ips=$(dig +short "$domain" | grep -E '^[0-9.]+$' || true)
-        for ip in $ips; do
-            echo -e "Adding route for ${PURPLE}${ip}${NC} via ${gateway}..."
-            ip route add "$ip" via "$gateway" 2>/dev/null || true
-        done
-    done < "$BYPASS_FILE"
+def main():
+    bypass_file = "/etc/wireguard/bypass_domains.txt"
+    settings_file = "/root/easy_wireguard/settings.conf"
+
+    try:
+        with open(bypass_file, "r") as f:
+            domains = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+    except FileNotFoundError:
+        domains = []
+
+    expanded_domains = set()
+    for d in domains:
+        expanded_domains.add(d)
+        for k, v in SERVICE_MAP.items():
+            if d == k or d.endswith("." + k):
+                expanded_domains.update(v)
+
+    ips_to_exclude = set()
+    for d in expanded_domains:
+        resolved = resolve_domain(d)
+        ips_to_exclude.update(resolved)
+        if not d.startswith("www."):
+            ips_to_exclude.update(resolve_domain("www." + d))
+
+    networks = [ipaddress.IPv4Network("0.0.0.0/0")]
+
+    for ip in ips_to_exclude:
+        exclude_net = ipaddress.IPv4Network(f"{ip}/32")
+        new_networks = []
+        for net in networks:
+            if exclude_net.subnet_of(net):
+                new_networks.extend(list(net.address_exclude(exclude_net)))
+            else:
+                new_networks.append(net)
+        networks = new_networks
+
+    collapsed = list(ipaddress.collapse_addresses(networks))
+
+    if not ips_to_exclude:
+        final_str = "0.0.0.0/1, 128.0.0.0/1"
+    else:
+        final_str = ", ".join(str(n) for n in collapsed)
+
+    try:
+        with open(settings_file, "r") as f:
+            lines = f.readlines()
+
+        with open(settings_file, "w") as f:
+            found = False
+            for line in lines:
+                if line.startswith("DEFAULT_ALLOWED_IPS="):
+                    f.write('DEFAULT_ALLOWED_IPS="' + final_str + '"\n')
+                    found = True
+                else:
+                    f.write(line)
+            if not found:
+                f.write('DEFAULT_ALLOWED_IPS="' + final_str + '"\n')
+        print("Updated AllowedIPs with " + str(len(ips_to_exclude)) + " bypassed IPs.")
+    except Exception as e:
+        print("Error updating settings: " + str(e))
+
+    # Process client configs separately
+    client_configs = glob.glob("/etc/wireguard/clients/*.conf")
+    for conf_path in client_configs:
+        try:
+            with open(conf_path, "r") as cf:
+                c_lines = cf.readlines()
+            with open(conf_path, "w") as cf:
+                for line in c_lines:
+                    if re.match(r"^AllowedIPs\s*=", line):
+                        # Preserve IPv6 if it exists
+                        parts = line.split("=")[1].split(",")
+                        ipv6_parts = [p.strip() for p in parts if ":" in p]
+
+                        new_allowed = final_str
+                        if ipv6_parts:
+                            new_allowed += ", " + ", ".join(ipv6_parts)
+
+                        cf.write("AllowedIPs = " + new_allowed + "\n")
+                    else:
+                        cf.write(line)
+        except Exception:
+            pass
+
+if __name__ == "__main__":
+    main()
+PY_CALC_EOF
+    echo -e "${PURPLE}Note: Bypasses apply to newly added clients.${NC}"
+    echo -e "${PURPLE}To apply to existing clients, re-add them or update their AllowedIPs.${NC}"
 }
 
 add_domain() {
@@ -50,7 +148,7 @@ add_domain() {
     read -r raw_domain
     domain=$(echo "$raw_domain" | tr -cd '[:alnum:]_.-')
     if [[ -n "$domain" ]]; then
-        if grep -Fxq "$domain" "$BYPASS_FILE"; then
+        if grep -Fxq "$domain" "$BYPASS_FILE" 2>/dev/null; then
             echo -e "${PURPLE}Domain already in bypass list.${NC}"
         else
             echo "$domain" >> "$BYPASS_FILE"
@@ -62,6 +160,10 @@ add_domain() {
 
 remove_domain() {
     echo -e "${GREEN}Bypass List:${NC}"
+    if [[ ! -s "$BYPASS_FILE" ]]; then
+        echo "No domains in list."
+        return
+    fi
     mapfile -t domains < "$BYPASS_FILE"
     for i in "${!domains[@]}"; do
         echo "[$i] ${domains[$i]}"
@@ -72,7 +174,7 @@ remove_domain() {
         domain="${domains[$index]}"
         sed -i "$((index + 1))d" "$BYPASS_FILE"
         echo -e "${RED}Removed ${domain} from bypass list.${NC}"
-        echo -e "${PURPLE}Note: Existing routes remain until reboot or manual removal.${NC}"
+        update_routes
     fi
 }
 
@@ -94,6 +196,12 @@ print_menu() {
     echo -e "${PURPLE}└────────────────────────────────────────────────────┘${NC}"
 }
 
+if [[ "${1:-}" == "--cli-update" ]]; then
+    init_bypass
+    update_routes
+    exit 0
+fi
+
 main_menu() {
     init_bypass
     while true; do
@@ -105,7 +213,13 @@ main_menu() {
         case "$opt" in
             1) add_domain ;;
             2) remove_domain ;;
-            3) cat "$BYPASS_FILE" ;;
+            3)
+                if [[ -f "$BYPASS_FILE" && -s "$BYPASS_FILE" ]]; then
+                    cat "$BYPASS_FILE"
+                else
+                    echo "No domains in list."
+                fi
+                ;;
             4) update_routes ;;
             0) break ;;
             *) echo -e "${RED}Invalid option.${NC}" ;;
@@ -117,4 +231,6 @@ main_menu() {
     done
 }
 
-main_menu
+if [[ "${1:-}" != "--cli-update" ]]; then
+    main_menu
+fi
