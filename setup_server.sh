@@ -143,7 +143,6 @@ rm -rf /root/easy_wireguard/clients 2>/dev/null || true
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
 # Patch everything to latest version for security
 apt-get update -y
-apt-get upgrade -y
 apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq python3
 
 
