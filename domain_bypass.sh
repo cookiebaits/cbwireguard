@@ -41,11 +41,10 @@ SERVICE_MAP = {
     ],
     "netflix.com": [
         "netflix.com", "netflix.net", "nflximg.net", "nflxext.com", "nflxso.net", "nflxvideo.net",
-        "api-global.netflix.com", "customerevents.netflix.com", "ichnaea.netflix.com"
+        "api-global.netflix.com", "customerevents.netflix.com", "ichnaea.netflix.com", "dvd.netflix.com"
     ],
     "hulu.com": ["hulu.com", "huluim.com", "hulustream.com", "huluad.com"],
-    "primevideo.com": ["primevideo.com", "amazonvideo.com", "aiv-cdn.net", "aiv-delivery.net", "media-amazon.com"],
-    "amazon.com": ["amazon.com", "aws.amazon.com", "cloudfront.net"],
+    "primevideo.com": ["primevideo.com", "amazonvideo.com", "aiv-cdn.net", "aiv-delivery.net", "media-amazon.com", "amazon.com", "prime.com"],
     "max.com": ["max.com", "hbomax.com", "hbomaxcdn.com", "hbo.com"],
     "chatgpt.com": ["chatgpt.com", "openai.com", "auth0.com", "challenges.cloudflare.com", "chat.openai.com"],
     "openai.com": ["chatgpt.com", "openai.com", "auth0.com", "challenges.cloudflare.com", "api.openai.com"],
@@ -75,7 +74,10 @@ def main():
     for d in domains:
         expanded_domains.add(d)
         for k, v in SERVICE_MAP.items():
-            if d == k or d.endswith("." + k):
+            keyword = k.split('.')[0]
+            # Match if the user added the exact service domain, a subdomain of it,
+            # or just the service keyword (like 'netflix')
+            if d == k or d.endswith("." + k) or d == keyword:
                 expanded_domains.update(v)
 
     ips_to_exclude = set()

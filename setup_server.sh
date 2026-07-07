@@ -102,9 +102,8 @@ fi
 echo -en "${GREEN}Do you want to add a domain exemption for split tunneling? Enter domain or leave blank to skip: ${NC}"
 read -r input_BYPASS
 if [[ -n "$input_BYPASS" ]]; then
-    mkdir -p /etc/wireguard
-    echo "$input_BYPASS" >> /etc/wireguard/bypass_domains.txt
     HAS_BYPASS=true
+    BYPASS_DOMAIN="$input_BYPASS"
 else
     HAS_BYPASS=false
 fi
@@ -148,6 +147,10 @@ apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq python3
 echo -e "${GREEN}Generating secure encryption keys...${NC}"
 mkdir -p /etc/wireguard
 chmod 700 /etc/wireguard
+
+if [[ "$HAS_BYPASS" == "true" ]]; then
+    echo "$BYPASS_DOMAIN" >> /etc/wireguard/bypass_domains.txt
+fi
 
 SERVER_PRIVATE=$(wg genkey)
 SERVER_PUBLIC=$(echo "$SERVER_PRIVATE" | wg pubkey)
