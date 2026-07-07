@@ -32,17 +32,26 @@ import glob
 import re
 
 SERVICE_MAP = {
-    "disneyplus.com": ["disneyplus.com", "bamgrid.com", "dssott.com", "disney-plus.net", "disneystreaming.com", "cdn.registerdisney.go.com"],
-    "netflix.com": ["netflix.com", "netflix.net", "nflximg.net", "nflxext.com", "nflxso.net", "nflxvideo.net"],
-    "hulu.com": ["hulu.com", "huluim.com", "hulustream.com"],
-    "primevideo.com": ["primevideo.com", "amazonvideo.com", "aiv-cdn.net", "aiv-delivery.net"],
-    "amazon.com": ["primevideo.com", "amazonvideo.com", "aiv-cdn.net", "aiv-delivery.net", "amazon.com"],
-    "max.com": ["max.com", "hbomax.com", "hbomaxcdn.com"],
-    "chatgpt.com": ["chatgpt.com", "openai.com", "auth0.com"],
-    "openai.com": ["chatgpt.com", "openai.com", "auth0.com"],
-    "ticketmaster.com": ["ticketmaster.com", "livenation.com"],
-    "chase.com": ["chase.com"],
-    "bankofamerica.com": ["bankofamerica.com", "bofa.com"]
+    "disneyplus.com": [
+        "disneyplus.com", "bamgrid.com", "dssott.com", "disney-plus.net",
+        "disneystreaming.com", "cdn.registerdisney.go.com",
+        "global.edge.bamgrid.com", "api.disneyplus.com", "auth.disneyplus.com",
+        "js-agent.newrelic.com", "bam.nr-data.net", "cws.conviva.com", "braze.com", "disney.com", "go.com",
+        "my.disney.com", "cdn.registerdisney.go.com", "registerdisney.go.com", "disneyid.disney.com"
+    ],
+    "netflix.com": [
+        "netflix.com", "netflix.net", "nflximg.net", "nflxext.com", "nflxso.net", "nflxvideo.net",
+        "api-global.netflix.com", "customerevents.netflix.com", "ichnaea.netflix.com"
+    ],
+    "hulu.com": ["hulu.com", "huluim.com", "hulustream.com", "huluad.com"],
+    "primevideo.com": ["primevideo.com", "amazonvideo.com", "aiv-cdn.net", "aiv-delivery.net", "media-amazon.com"],
+    "amazon.com": ["amazon.com", "aws.amazon.com", "cloudfront.net"],
+    "max.com": ["max.com", "hbomax.com", "hbomaxcdn.com", "hbo.com"],
+    "chatgpt.com": ["chatgpt.com", "openai.com", "auth0.com", "challenges.cloudflare.com", "chat.openai.com"],
+    "openai.com": ["chatgpt.com", "openai.com", "auth0.com", "challenges.cloudflare.com", "api.openai.com"],
+    "ticketmaster.com": ["ticketmaster.com", "livenation.com", "tmclient.ticketmaster.com"],
+    "chase.com": ["chase.com", "chasecdn.com"],
+    "bankofamerica.com": ["bankofamerica.com", "bofa.com", "bankofamerica.com.akadns.net"]
 }
 
 def resolve_domain(domain):
@@ -70,11 +79,15 @@ def main():
                 expanded_domains.update(v)
 
     ips_to_exclude = set()
+    prefixes = ["", "www.", "api.", "auth.", "login.", "cdn.", "global.edge.", "app."]
     for d in expanded_domains:
-        resolved = resolve_domain(d)
-        ips_to_exclude.update(resolved)
-        if not d.startswith("www."):
-            ips_to_exclude.update(resolve_domain("www." + d))
+        for p in prefixes:
+            if d.startswith(p) and p != "":
+                host = d
+            else:
+                host = p + d
+            resolved = resolve_domain(host)
+            ips_to_exclude.update(resolved)
 
     networks = [ipaddress.IPv4Network("0.0.0.0/0")]
 
