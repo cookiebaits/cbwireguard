@@ -189,7 +189,8 @@ set_sysctl "net.ipv4.conf.default.rp_filter" "1"
 set_sysctl "net.ipv4.conf.all.accept_redirects" "0"
 set_sysctl "net.ipv4.conf.all.send_redirects" "0"
 set_sysctl "net.ipv4.conf.all.accept_source_route" "0"
-set_sysctl "net.ipv6.conf.all.disable_ipv6" "0"
+set_sysctl "net.ipv6.conf.all.disable_ipv6" "1"
+set_sysctl "net.ipv6.conf.default.disable_ipv6" "1"
 sysctl -p
 
 echo -e "${GREEN}Configuring UFW Firewall...${NC}"

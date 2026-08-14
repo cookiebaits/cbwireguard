@@ -91,9 +91,9 @@ def main():
     collapsed = list(ipaddress.collapse_addresses(networks))
 
     if not ips_to_exclude:
-        final_str = "0.0.0.0/1, 128.0.0.0/1"
+        final_str = "0.0.0.0/1, 128.0.0.0/1, ::/1, 8000::/1"
     else:
-        final_str = ", ".join(str(n) for n in collapsed)
+        final_str = ", ".join(str(n) for n in collapsed) + ", ::/1, 8000::/1"
 
     try:
         with open(settings_file, "r") as f:
