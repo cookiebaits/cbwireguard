@@ -142,6 +142,7 @@ rm -rf /etc/wireguard
 rm -rf /root/easy_wireguard/clients 2>/dev/null || true
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
+
 # P2: Removed apt-get update
 apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq python3
 
@@ -190,6 +191,7 @@ set_sysctl "net.ipv4.conf.all.accept_redirects" "0"
 set_sysctl "net.ipv4.conf.all.send_redirects" "0"
 set_sysctl "net.ipv4.conf.all.accept_source_route" "0"
 set_sysctl "net.ipv6.conf.all.disable_ipv6" "0"
+set_sysctl "net.ipv6.conf.default.disable_ipv6" "0"
 sysctl -p
 
 echo -e "${GREEN}Configuring UFW Firewall...${NC}"
