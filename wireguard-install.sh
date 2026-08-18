@@ -209,9 +209,9 @@ function installQuestions() {
 	echo "   8) 8443 (HTTPS Alt - Stealthy)"
 	echo "   9) Custom / Random"
 
-	read -rp "Select an option [1-9]: " PORT_OPTION
+	read -rp "Select an option [1-9] (Default: 1 for 443): " -e -i 1 PORT_OPTION
 	case "${PORT_OPTION}" in
-		1) SERVER_PORT=443 ;;
+		1|"") SERVER_PORT=443 ;;
 		2) SERVER_PORT=53 ;;
 		3) SERVER_PORT=123 ;;
 		4) SERVER_PORT=1194 ;;
