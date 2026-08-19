@@ -88,6 +88,9 @@ CLIENT_IP="$SERVER_PRIVATE_IP_PREFIX.$NEXT_IP"
 
 CLIENT_CONF="/etc/wireguard/clients/$DEVICE_NAME.conf"
 
+# P2: Random Keepalive between 15 and 25 seconds for stealth
+KEEPALIVE=$((RANDOM % 11 + 15))
+
 cat <<EOF > "$CLIENT_CONF"
 [Interface]
 PrivateKey = $DEVICE_PRIVATE
@@ -99,6 +102,7 @@ MTU = $MTU
 PublicKey = $SERVER_PUBLIC
 Endpoint = $IP_PORT
 AllowedIPs = $ALLOWED_IPS
+PersistentKeepalive = $KEEPALIVE
 EOF
 
 chmod 600 "$CLIENT_CONF"

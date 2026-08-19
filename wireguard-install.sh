@@ -199,29 +199,27 @@ function installQuestions() {
 
 	echo ""
 	echo "Select a WireGuard port:"
-	echo "   1) 51820 (Standard WireGuard)"
+	echo "   1) 443 (HTTPS/QUIC - Most Stealthy)"
 	echo "   2) 53 (DNS - Stealthy)"
 	echo "   3) 123 (NTP - Stealthy)"
-	echo "   4) 443 (HTTPS - Stealthy/QUIC)"
+	echo "   4) 1194 (OpenVPN UDP - Stealthy)"
 	echo "   5) 80 (HTTP - Stealthy)"
-	echo "   6) 1194 (OpenVPN Default - Stealthy)"
-	echo "   7) 3389 (RDP - Stealthy)"
-	echo "   8) 8080 (HTTP Alt - Stealthy)"
-	echo "   9) 8443 (HTTPS Alt - Stealthy)"
-	echo "   10) Custom / Random"
+	echo "   6) 3389 (RDP - Stealthy)"
+	echo "   7) 8080 (HTTP Alt - Stealthy)"
+	echo "   8) 8443 (HTTPS Alt - Stealthy)"
+	echo "   9) Custom / Random"
 
-	read -rp "Select an option [1-10]: " PORT_OPTION
+	read -rp "Select an option [1-9] (Default: 1 for 443): " -e -i 1 PORT_OPTION
 	case "${PORT_OPTION}" in
-		1) SERVER_PORT=51820 ;;
+		1|"") SERVER_PORT=443 ;;
 		2) SERVER_PORT=53 ;;
 		3) SERVER_PORT=123 ;;
-		4) SERVER_PORT=443 ;;
+		4) SERVER_PORT=1194 ;;
 		5) SERVER_PORT=80 ;;
-		6) SERVER_PORT=1194 ;;
-		7) SERVER_PORT=3389 ;;
-		8) SERVER_PORT=8080 ;;
-		9) SERVER_PORT=8443 ;;
-		10|*)
+		6) SERVER_PORT=3389 ;;
+		7) SERVER_PORT=8080 ;;
+		8) SERVER_PORT=8443 ;;
+		9|*)
 			RANDOM_PORT=$(shuf -i49152-65535 -n1)
 			until [[ ${SERVER_PORT} =~ ^[0-9]+$ ]] && [ "${SERVER_PORT}" -ge 1 ] && [ "${SERVER_PORT}" -le 65535 ]; do
 				read -rp "Server WireGuard port [1-65535]: " -e -i "${RANDOM_PORT}" SERVER_PORT
@@ -355,7 +353,17 @@ PostDown = ip6tables -t nat -D POSTROUTING -o ${SERVER_PUB_NIC} -j MASQUERADE" >
 
 	# Enable routing on the server
 	echo "net.ipv4.ip_forward = 1
-net.ipv6.conf.all.forwarding = 1" >/etc/sysctl.d/wg.conf
+net.ipv6.conf.all.forwarding = 1
+net.core.default_qdisc = fq_codel
+net.ipv4.tcp_congestion_control = bbr
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+net.core.rmem_default = 262144
+net.core.wmem_default = 262144
+net.core.netdev_max_backlog = 10000
+net.ipv4.tcp_rmem = 4096 87380 16777216
+net.ipv4.tcp_wmem = 4096 65536 16777216
+net.ipv4.tcp_mtu_probing = 1" >/etc/sysctl.d/wg.conf
 
 	if [[ ${OS} == 'fedora' ]]; then
 		chmod -v 700 /etc/wireguard
@@ -487,13 +495,13 @@ function newClient() {
 
 	CLIENT_CONF_DNS_1=${CLIENT_DNS_1}
 	CLIENT_CONF_DNS_2=${CLIENT_DNS_2}
-	CLIENT_CONF_MTU="# MTU = 1420"
+	CLIENT_CONF_MTU="MTU = 1420"
 	CLIENT_CONF_ALLOWED_IPS=${ALLOWED_IPS}
 
 	if [[ -f "$SETTINGS_CONF" ]]; then
 		# Parse settings.conf safely
 		while IFS='=' read -r key value; do
-			if [[ "$key" == "MTU" ]]; then
+			if [[ "$key" == "MTU" ]] || [[ "$key" == "DEFAULT_MTU" ]]; then
 				CLIENT_CONF_MTU="MTU = ${value}"
 			elif [[ "$key" == "DNS1" ]]; then
 				CLIENT_CONF_DNS_1="${value}"
@@ -510,6 +518,9 @@ function newClient() {
 		fi
 	fi
 
+	# P2: Random Keepalive between 15 and 25 seconds for stealth
+	KEEPALIVE=$((RANDOM % 11 + 15))
+
 	# Create client file and add the server as a peer
 	echo "[Interface]
 PrivateKey = ${CLIENT_PRIV_KEY}
@@ -521,7 +532,8 @@ ${CLIENT_CONF_MTU}
 PublicKey = ${SERVER_PUB_KEY}
 PresharedKey = ${CLIENT_PRE_SHARED_KEY}
 Endpoint = ${ENDPOINT}
-AllowedIPs = ${CLIENT_CONF_ALLOWED_IPS}" >"${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf"
+AllowedIPs = ${CLIENT_CONF_ALLOWED_IPS}
+PersistentKeepalive = ${KEEPALIVE}" >"${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf"
 
 	# Add the client as a peer to the server
 	echo -e "\n### Client ${CLIENT_NAME}
