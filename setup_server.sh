@@ -102,8 +102,9 @@ fi
 echo -en "${GREEN}Do you want to add a domain exemption for split tunneling? Enter domain or leave blank to skip: ${NC}"
 read -r input_BYPASS
 if [[ -n "$input_BYPASS" ]]; then
+    mkdir -p /etc/wireguard
+    echo "$input_BYPASS" >> /etc/wireguard/bypass_domains.txt
     HAS_BYPASS=true
-    BYPASS_DOMAIN="$input_BYPASS"
 else
     HAS_BYPASS=false
 fi
@@ -141,45 +142,13 @@ rm -rf /etc/wireguard
 rm -rf /root/easy_wireguard/clients 2>/dev/null || true
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
-# Patch everything to latest version for security
-apt-get update -y
-apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq python3 golang git make
 
-echo -e "${GREEN}Compiling stealth wireguard-go...${NC}"
-TEMP_DIR=$(mktemp -d)
-git clone https://git.zx2c4.com/wireguard-go "$TEMP_DIR"
-(
-    cd "$TEMP_DIR"
-    if [[ -f device/messages.go ]]; then
-        sed -i -E 's/messageInitiationType\s*=\s*1/messageInitiationType = 5/i' device/messages.go
-        sed -i -E 's/messageResponseType\s*=\s*2/messageResponseType = 6/i' device/messages.go
-        sed -i -E 's/messageCookieReplyType\s*=\s*3/messageCookieReplyType = 7/i' device/messages.go
-        sed -i -E 's/messageTransportType\s*=\s*4/messageTransportType = 8/i' device/messages.go
-    elif [[ -f device/noise-protocol.go ]]; then
-        sed -i -E 's/MessageInitiationType\s*=\s*1/MessageInitiationType = 5/i' device/noise-protocol.go
-        sed -i -E 's/MessageResponseType\s*=\s*2/MessageResponseType = 6/i' device/noise-protocol.go
-        sed -i -E 's/MessageCookieReplyType\s*=\s*3/MessageCookieReplyType = 7/i' device/noise-protocol.go
-        sed -i -E 's/MessageTransportType\s*=\s*4/MessageTransportType = 8/i' device/noise-protocol.go
-    fi
-    make
-    mv wireguard-go /usr/local/bin/wireguard-go
-)
-rm -rf "$TEMP_DIR"
-
-mkdir -p /etc/systemd/system/wg-quick@wg0.service.d/
-cat <<EOF_SYSTEMD > /etc/systemd/system/wg-quick@wg0.service.d/override.conf
-[Service]
-Environment=WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go
-EOF_SYSTEMD
-systemctl daemon-reload
+# P2: Removed apt-get update
+apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq python3
 
 echo -e "${GREEN}Generating secure encryption keys...${NC}"
 mkdir -p /etc/wireguard
 chmod 700 /etc/wireguard
-
-if [[ "$HAS_BYPASS" == "true" ]]; then
-    echo "$BYPASS_DOMAIN" >> /etc/wireguard/bypass_domains.txt
-fi
 
 SERVER_PRIVATE=$(wg genkey)
 SERVER_PUBLIC=$(echo "$SERVER_PRIVATE" | wg pubkey)
@@ -205,16 +174,10 @@ SaveConfig = false
 
 PostUp = ufw route allow in on wg0 out on $NETWORK_DEVICE
 PostUp = iptables -t nat -A POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
-PostUp = iptables -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud
 PostUp = iptables -t mangle -A POSTROUTING -o $NETWORK_DEVICE -j TTL --ttl-set 64
-PostUp = ip6tables -A FORWARD -i wg0 -j REJECT
-PostUp = ip6tables -A OUTPUT -o wg0 -j REJECT
 PreDown = ufw route delete allow in on wg0 out on $NETWORK_DEVICE
 PreDown = iptables -t nat -D POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
-PreDown = iptables -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud
 PreDown = iptables -t mangle -D POSTROUTING -o $NETWORK_DEVICE -j TTL --ttl-set 64
-PreDown = ip6tables -D FORWARD -i wg0 -j REJECT
-PreDown = ip6tables -D OUTPUT -o wg0 -j REJECT
 EOF
 
 chmod 600 /etc/wireguard/wg0.conf
@@ -223,23 +186,19 @@ echo -e "${GREEN}Optimizing Network & Hardening Security...${NC}"
 set_sysctl "net.ipv4.ip_forward" "1"
 set_sysctl "net.core.default_qdisc" "fq"
 set_sysctl "net.ipv4.tcp_congestion_control" "bbr"
-set_sysctl "net.ipv4.tcp_mtu_probing" "1"
 set_sysctl "net.core.rmem_max" "16777216"
 set_sysctl "net.core.wmem_max" "16777216"
-set_sysctl "net.core.rmem_default" "262144"
-set_sysctl "net.core.wmem_default" "262144"
-set_sysctl "net.core.netdev_max_backlog" "10000"
 set_sysctl "net.ipv4.tcp_rmem" "4096 87380 16777216"
 set_sysctl "net.ipv4.tcp_wmem" "4096 65536 16777216"
+set_sysctl "net.ipv4.tcp_mtu_probing" "1"
 # Security Hardening
 set_sysctl "net.ipv4.conf.all.rp_filter" "1"
 set_sysctl "net.ipv4.conf.default.rp_filter" "1"
 set_sysctl "net.ipv4.conf.all.accept_redirects" "0"
 set_sysctl "net.ipv4.conf.all.send_redirects" "0"
 set_sysctl "net.ipv4.conf.all.accept_source_route" "0"
-# Disable IPv6 routing only on the interface where applicable, keep host IPv6 enabled
-set_sysctl "net.ipv6.conf.all.disable_ipv6" "0"
-set_sysctl "net.ipv6.conf.default.disable_ipv6" "0"
+set_sysctl "net.ipv6.conf.all.disable_ipv6" "1"
+set_sysctl "net.ipv6.conf.default.disable_ipv6" "1"
 sysctl -p
 
 echo -e "${GREEN}Configuring UFW Firewall...${NC}"
