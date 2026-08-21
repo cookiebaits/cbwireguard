@@ -17,49 +17,46 @@ function installPackages() {
 }
 
 function installWireguardGo() {
-	# We compile wireguard-go from source for protocol-level stealth patch
-	# Skipping package manager to ensure custom binary is used
-	echo -e "${ORANGE}Compiling wireguard-go from source for stealth modifications...${NC}"
-
-	# Install build dependencies if missing
-	if ! command -v go &>/dev/null || ! command -v make &>/dev/null || ! command -v git &>/dev/null; then
-		if [[ ${OS} == 'ubuntu' ]] || [[ ${OS} == 'debian' ]]; then
-			apt-get install -y golang make git
-		elif [[ ${OS} == 'fedora' ]] || [[ ${OS} == 'centos' ]] || [[ ${OS} == 'almalinux' ]] || [[ ${OS} == 'rocky' ]] || [[ ${OS} == 'oracle' ]]; then
-			yum install -y golang make git
-		elif [[ ${OS} == 'arch' ]]; then
-			pacman -S --needed --noconfirm go make git
-		elif [[ ${OS} == 'alpine' ]]; then
-			apk add go make git
-		fi
+	# Try to install wireguard-go from package manager, if it fails, compile it from source
+	if [[ ${OS} == 'ubuntu' ]] || [[ ${OS} == 'debian' && ${VERSION_ID} -gt 10 ]]; then
+		apt-get install -y wireguard-go || true
+	elif [[ ${OS} == 'debian' ]]; then
+		apt-get install -y -t buster-backports wireguard-go || true
+	elif [[ ${OS} == 'fedora' ]]; then
+		dnf install -y wireguard-go || true
+	elif [[ ${OS} == 'centos' ]] || [[ ${OS} == 'almalinux' ]] || [[ ${OS} == 'rocky' ]]; then
+		yum install -y wireguard-go || true
+	elif [[ ${OS} == 'oracle' ]]; then
+		dnf install -y wireguard-go || true
+	elif [[ ${OS} == 'arch' ]]; then
+		pacman -S --needed --noconfirm wireguard-go || true
+	elif [[ ${OS} == 'alpine' ]]; then
+		apk add wireguard-go || true
 	fi
 
-	# Build wireguard-go with stealth patches
-	TEMP_DIR=$(mktemp -d)
-	git clone https://git.zx2c4.com/wireguard-go "$TEMP_DIR"
-	(
-		cd "$TEMP_DIR"
-		if [[ -f device/messages.go ]]; then
-			sed -i -E 's/messageInitiationType\s*=\s*1/messageInitiationType = 5/i' device/messages.go
-			sed -i -E 's/messageResponseType\s*=\s*2/messageResponseType = 6/i' device/messages.go
-			sed -i -E 's/messageCookieReplyType\s*=\s*3/messageCookieReplyType = 7/i' device/messages.go
-			sed -i -E 's/messageTransportType\s*=\s*4/messageTransportType = 8/i' device/messages.go
-		elif [[ -f device/noise-protocol.go ]]; then
-			sed -i -E 's/MessageInitiationType\s*=\s*1/MessageInitiationType = 5/i' device/noise-protocol.go
-			sed -i -E 's/MessageResponseType\s*=\s*2/MessageResponseType = 6/i' device/noise-protocol.go
-			sed -i -E 's/MessageCookieReplyType\s*=\s*3/MessageCookieReplyType = 7/i' device/noise-protocol.go
-			sed -i -E 's/MessageTransportType\s*=\s*4/MessageTransportType = 8/i' device/noise-protocol.go
-		fi
-		make && mv wireguard-go /usr/local/bin/wireguard-go
-	)
-	rm -rf "$TEMP_DIR"
+	# Fallback: if wireguard-go is still not installed, compile it from source
+	if ! command -v wireguard-go &>/dev/null; then
+		echo -e "${ORANGE}wireguard-go package not found. Compiling from source fallback...${NC}"
 
-	mkdir -p "/etc/systemd/system/wg-quick@${SERVER_WG_NIC}.service.d/"
-	cat <<EOF_SYSTEMD > "/etc/systemd/system/wg-quick@${SERVER_WG_NIC}.service.d/override.conf"
-[Service]
-Environment=WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go
-EOF_SYSTEMD
-	systemctl daemon-reload
+		# Install build dependencies if missing
+		if ! command -v go &>/dev/null || ! command -v make &>/dev/null || ! command -v git &>/dev/null; then
+			if [[ ${OS} == 'ubuntu' ]] || [[ ${OS} == 'debian' ]]; then
+				apt-get install -y golang make git
+			elif [[ ${OS} == 'fedora' ]] || [[ ${OS} == 'centos' ]] || [[ ${OS} == 'almalinux' ]] || [[ ${OS} == 'rocky' ]] || [[ ${OS} == 'oracle' ]]; then
+				yum install -y golang make git
+			elif [[ ${OS} == 'arch' ]]; then
+				pacman -S --needed --noconfirm go make git
+			elif [[ ${OS} == 'alpine' ]]; then
+				apk add go make git
+			fi
+		fi
+
+		# Build wireguard-go
+		TEMP_DIR=$(mktemp -d)
+		git clone https://git.zx2c4.com/wireguard-go "$TEMP_DIR"
+		(cd "$TEMP_DIR" && make && mv wireguard-go /usr/local/bin/wireguard-go)
+		rm -rf "$TEMP_DIR"
+	fi
 }
 
 function isRoot() {
@@ -263,11 +260,14 @@ function installWireGuard() {
 
 	# Install WireGuard tools and module
 	if [[ ${OS} == 'ubuntu' ]] || [[ ${OS} == 'debian' && ${VERSION_ID} -gt 10 ]]; then
+		apt-get update
 		installPackages apt-get install -y wireguard iptables resolvconf qrencode
 	elif [[ ${OS} == 'debian' ]]; then
 		if ! grep -rqs "^deb .* buster-backports" /etc/apt/; then
 			echo "deb http://deb.debian.org/debian buster-backports main" >/etc/apt/sources.list.d/backports.list
+			apt-get update
 		fi
+		apt-get update
 		installPackages apt-get install -y iptables resolvconf qrencode
 		installPackages apt-get install -y -t buster-backports wireguard
 	elif [[ ${OS} == 'fedora' ]]; then
@@ -342,36 +342,20 @@ PostDown = firewall-cmd --zone=public --add-interface=${SERVER_WG_NIC} && firewa
 		echo "PostUp = iptables -I INPUT -p udp --dport ${SERVER_PORT} -j ACCEPT
 PostUp = iptables -I FORWARD -i ${SERVER_PUB_NIC} -o ${SERVER_WG_NIC} -j ACCEPT
 PostUp = iptables -I FORWARD -i ${SERVER_WG_NIC} -j ACCEPT
-PostUp = iptables -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PostUp = iptables -t nat -A POSTROUTING -o ${SERVER_PUB_NIC} -j MASQUERADE
-PostUp = iptables -t mangle -A POSTROUTING -o ${SERVER_PUB_NIC} -j TTL --ttl-set 64
 PostUp = ip6tables -I FORWARD -i ${SERVER_WG_NIC} -j ACCEPT
 PostUp = ip6tables -t nat -A POSTROUTING -o ${SERVER_PUB_NIC} -j MASQUERADE
 PostDown = iptables -D INPUT -p udp --dport ${SERVER_PORT} -j ACCEPT
 PostDown = iptables -D FORWARD -i ${SERVER_PUB_NIC} -o ${SERVER_WG_NIC} -j ACCEPT
 PostDown = iptables -D FORWARD -i ${SERVER_WG_NIC} -j ACCEPT
-PostDown = iptables -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PostDown = iptables -t nat -D POSTROUTING -o ${SERVER_PUB_NIC} -j MASQUERADE
-PostDown = iptables -t mangle -D POSTROUTING -o ${SERVER_PUB_NIC} -j TTL --ttl-set 64
 PostDown = ip6tables -D FORWARD -i ${SERVER_WG_NIC} -j ACCEPT
 PostDown = ip6tables -t nat -D POSTROUTING -o ${SERVER_PUB_NIC} -j MASQUERADE" >>"/etc/wireguard/${SERVER_WG_NIC}.conf"
 	fi
 
 	# Enable routing on the server
 	echo "net.ipv4.ip_forward = 1
-net.ipv6.conf.all.forwarding = 1
-net.ipv6.conf.all.disable_ipv6 = 0
-net.ipv6.conf.default.disable_ipv6 = 0
-net.core.default_qdisc = fq
-net.ipv4.tcp_congestion_control = bbr
-net.ipv4.tcp_mtu_probing = 1
-net.core.rmem_max = 16777216
-net.core.wmem_max = 16777216
-net.core.rmem_default = 262144
-net.core.wmem_default = 262144
-net.core.netdev_max_backlog = 10000
-net.ipv4.tcp_rmem = 4096 87380 16777216
-net.ipv4.tcp_wmem = 4096 65536 16777216" >/etc/sysctl.d/wg.conf
+net.ipv6.conf.all.forwarding = 1" >/etc/sysctl.d/wg.conf
 
 	if [[ ${OS} == 'fedora' ]]; then
 		chmod -v 700 /etc/wireguard
