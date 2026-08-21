@@ -20,14 +20,18 @@ This wrapper dynamically pulls the latest scripts from GitHub, ensuring your ser
 ## 🚀 Key Feature Upgrades
 
 - **Enhanced Stealth & Bypassing:** Dynamically configure MTU, DNS, and AllowedIPs (split-tunneling) to bypass streaming service detection and restrictive firewalls.
+- **Protocol-Level Obfuscation:** Bypasses DPI (Deep Packet Inspection) natively by compiling a modified `wireguard-go` binary with shifted magic numbers.
+- **Dokploy Traefik Integration:** Seamlessly funnels UDP WireGuard traffic through a proxy bridge if standard port 443 is in use by a Traefik reverse proxy.
 - **Domain-Based Split Tunneling:** Bypass specific domains from the VPN tunnel in real-time.
 - **Hardened Security & Sanitization:** Inputs are strictly sanitized to prevent injection attacks, and sensitive cryptographic operations are protected from process list monitoring.
-- **Maximized Throughput:** Injects Kernel-level BBR (Bottleneck Bandwidth and RTT) and FQ queueing, paired with an optimized default MTU (1420) to eliminate packet fragmentation and maximize speeds.
+- **Location Spoofing Prevention:** Blackholes IPv6 traffic natively (`::/1, 8000::/1`) to prevent location leaks while preserving host networking.
+- **Maximized Throughput & MSS Clamping:** Injects Kernel-level BBR, FQ queueing, and `tcp_mtu_probing`, paired with robust `TCPMSS` clamping to eliminate packet fragmentation and resolve strict site hangs.
 - **Zero-Downtime Hot Reloading:** Adding a new peer instantly injects them into the live server. Existing users are never disconnected when the configuration updates.
 - **Military-Grade Security:** Enforces strict execution rules (`set -euo pipefail`), root-only directory locks (`chmod 700`), and secure unprivileged port generation.
 - **Encrypted Backups:** All backups are now AES-256 encrypted using OpenSSL.
 - **Smart IP Tracking:** Intelligently scans the server to dynamically assign IP addresses, preventing crashes from corrupted or empty lines.
 - **Unified Backup Manager:** Securely create, list, restore, and destroy server backups from a single interactive menu.
+- **Hyper-Fast Installation:** Streamlined setup without bloated package manager updates.
 
 ---
 
