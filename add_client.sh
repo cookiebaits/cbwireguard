@@ -15,7 +15,7 @@ fi
 # P3: Defaults from settings
 MTU=${DEFAULT_MTU:-1420}
 DNS=${DEFAULT_DNS:-"94.140.14.49, 9.9.9.9, 94.140.14.59"}
-ALLOWED_IPS=${DEFAULT_ALLOWED_IPS:-"0.0.0.0/1, 128.0.0.0/1, ::/1, 8000::/1"}
+ALLOWED_IPS=${DEFAULT_ALLOWED_IPS:-"0.0.0.0/1, 128.0.0.0/1"}
 
 if [[ "$EUID" -ne 0 ]]; then
     echo -e "${RED}Security Error: Please run this script as root (sudo).${NC}"
@@ -88,9 +88,6 @@ CLIENT_IP="$SERVER_PRIVATE_IP_PREFIX.$NEXT_IP"
 
 CLIENT_CONF="/etc/wireguard/clients/$DEVICE_NAME.conf"
 
-# P2: Random Keepalive between 15 and 25 seconds for stealth
-KEEPALIVE=$((RANDOM % 11 + 15))
-
 cat <<EOF > "$CLIENT_CONF"
 [Interface]
 PrivateKey = $DEVICE_PRIVATE
@@ -102,7 +99,6 @@ MTU = $MTU
 PublicKey = $SERVER_PUBLIC
 Endpoint = $IP_PORT
 AllowedIPs = $ALLOWED_IPS
-PersistentKeepalive = $KEEPALIVE
 EOF
 
 chmod 600 "$CLIENT_CONF"
