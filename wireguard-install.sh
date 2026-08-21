@@ -16,52 +16,6 @@ function installPackages() {
 	fi
 }
 
-function installWireguardGo() {
-	# We compile wireguard-go from source for protocol-level stealth patch
-	# Skipping package manager to ensure custom binary is used
-	echo -e "${ORANGE}Compiling wireguard-go from source for stealth modifications...${NC}"
-
-	# Install build dependencies if missing
-	if ! command -v go &>/dev/null || ! command -v make &>/dev/null || ! command -v git &>/dev/null; then
-		if [[ ${OS} == 'ubuntu' ]] || [[ ${OS} == 'debian' ]]; then
-			apt-get install -y golang make git
-		elif [[ ${OS} == 'fedora' ]] || [[ ${OS} == 'centos' ]] || [[ ${OS} == 'almalinux' ]] || [[ ${OS} == 'rocky' ]] || [[ ${OS} == 'oracle' ]]; then
-			yum install -y golang make git
-		elif [[ ${OS} == 'arch' ]]; then
-			pacman -S --needed --noconfirm go make git
-		elif [[ ${OS} == 'alpine' ]]; then
-			apk add go make git
-		fi
-	fi
-
-	# Build wireguard-go with stealth patches
-	TEMP_DIR=$(mktemp -d)
-	git clone https://git.zx2c4.com/wireguard-go "$TEMP_DIR"
-	(
-		cd "$TEMP_DIR"
-		if [[ -f device/messages.go ]]; then
-			sed -i -E 's/messageInitiationType\s*=\s*1/messageInitiationType = 5/i' device/messages.go
-			sed -i -E 's/messageResponseType\s*=\s*2/messageResponseType = 6/i' device/messages.go
-			sed -i -E 's/messageCookieReplyType\s*=\s*3/messageCookieReplyType = 7/i' device/messages.go
-			sed -i -E 's/messageTransportType\s*=\s*4/messageTransportType = 8/i' device/messages.go
-		elif [[ -f device/noise-protocol.go ]]; then
-			sed -i -E 's/MessageInitiationType\s*=\s*1/MessageInitiationType = 5/i' device/noise-protocol.go
-			sed -i -E 's/MessageResponseType\s*=\s*2/MessageResponseType = 6/i' device/noise-protocol.go
-			sed -i -E 's/MessageCookieReplyType\s*=\s*3/MessageCookieReplyType = 7/i' device/noise-protocol.go
-			sed -i -E 's/MessageTransportType\s*=\s*4/MessageTransportType = 8/i' device/noise-protocol.go
-		fi
-		make && mv wireguard-go /usr/local/bin/wireguard-go
-	)
-	rm -rf "$TEMP_DIR"
-
-	mkdir -p "/etc/systemd/system/wg-quick@${SERVER_WG_NIC}.service.d/"
-	cat <<EOF_SYSTEMD > "/etc/systemd/system/wg-quick@${SERVER_WG_NIC}.service.d/override.conf"
-[Service]
-Environment=WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go
-EOF_SYSTEMD
-	systemctl daemon-reload
-}
-
 function isRoot() {
 	if [ "${EUID}" -ne 0 ]; then
 		echo "You need to run this script as root"
@@ -296,8 +250,6 @@ function installWireGuard() {
 		apk update
 		installPackages apk add wireguard-tools iptables libqrencode-tools
 	fi
-
-		installWireguardGo
 
 	# Verify WireGuard installation
 	if ! command -v wg &>/dev/null; then

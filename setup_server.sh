@@ -149,34 +149,11 @@ rm -rf /root/easy_wireguard/clients 2>/dev/null || true
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
 # Patch everything to latest version for security
-apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq python3 golang git make
+apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq python3
 
-echo -e "${GREEN}Compiling stealth wireguard-go...${NC}"
-TEMP_DIR=$(mktemp -d)
-git clone https://git.zx2c4.com/wireguard-go "$TEMP_DIR"
-(
-    cd "$TEMP_DIR"
-    if [[ -f device/messages.go ]]; then
-        sed -i -E 's/messageInitiationType\s*=\s*1/messageInitiationType = 5/i' device/messages.go
-        sed -i -E 's/messageResponseType\s*=\s*2/messageResponseType = 6/i' device/messages.go
-        sed -i -E 's/messageCookieReplyType\s*=\s*3/messageCookieReplyType = 7/i' device/messages.go
-        sed -i -E 's/messageTransportType\s*=\s*4/messageTransportType = 8/i' device/messages.go
-    elif [[ -f device/noise-protocol.go ]]; then
-        sed -i -E 's/MessageInitiationType\s*=\s*1/MessageInitiationType = 5/i' device/noise-protocol.go
-        sed -i -E 's/MessageResponseType\s*=\s*2/MessageResponseType = 6/i' device/noise-protocol.go
-        sed -i -E 's/MessageCookieReplyType\s*=\s*3/MessageCookieReplyType = 7/i' device/noise-protocol.go
-        sed -i -E 's/MessageTransportType\s*=\s*4/MessageTransportType = 8/i' device/noise-protocol.go
-    fi
-    make
-    mv wireguard-go /usr/local/bin/wireguard-go
-)
-rm -rf "$TEMP_DIR"
-
-mkdir -p /etc/systemd/system/wg-quick@wg0.service.d/
-cat <<EOF_SYSTEMD > /etc/systemd/system/wg-quick@wg0.service.d/override.conf
-[Service]
-Environment=WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go
-EOF_SYSTEMD
+# Clean up any lingering wireguard-go stealth implementations to restore compatibility
+rm -f /usr/local/bin/wireguard-go
+rm -f /etc/systemd/system/wg-quick@wg0.service.d/override.conf
 systemctl daemon-reload
 
 echo -e "${GREEN}Generating secure encryption keys...${NC}"

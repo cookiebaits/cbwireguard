@@ -20,7 +20,6 @@ This wrapper dynamically pulls the latest scripts from GitHub, ensuring your ser
 ## 🚀 Key Feature Upgrades
 
 - **Enhanced Stealth & Bypassing:** Dynamically configure MTU, DNS, and AllowedIPs (split-tunneling) to bypass streaming service detection and restrictive firewalls.
-- **Protocol-Level Obfuscation:** Bypasses DPI (Deep Packet Inspection) natively by compiling a modified `wireguard-go` binary with shifted magic numbers.
 - **Dokploy Traefik Integration:** Seamlessly funnels UDP WireGuard traffic through a proxy bridge if standard port 443 is in use by a Traefik reverse proxy.
 - **Domain-Based Split Tunneling:** Bypass specific domains from the VPN tunnel in real-time.
 - **Hardened Security & Sanitization:** Inputs are strictly sanitized to prevent injection attacks, and sensitive cryptographic operations are protected from process list monitoring.
