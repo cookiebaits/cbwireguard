@@ -12,6 +12,7 @@ fi
 GREEN='\033[0;32m'
 PURPLE='\033[0;35m'
 RED='\033[0;31m'
+ORANGE='\033[0;33m'
 NC='\033[0m'
 
 SETTINGS_FILE="/root/easy_wireguard/settings.conf"
@@ -77,9 +78,15 @@ while true; do
     esac
 
     if check_port_usage "$PORT"; then
-        echo -e "${RED}Error: Port ${PORT} is already in use by another process!${NC}"
-        echo -en "${GREEN}Please enter another port or select from the menu above: ${NC}"
-        read -r input_VPN_PORT
+        if [[ "$PORT" == "443" ]] && docker ps -q -f name=dokploy-traefik >/dev/null 2>&1; then
+            echo -e "${ORANGE}dokploy-traefik detected on port 443. Configuring internal routing...${NC}"
+            INTERNAL_PORT="51820"
+            break
+        else
+            echo -e "${RED}Error: Port ${PORT} is already in use by another process!${NC}"
+            echo -en "${GREEN}Please enter another port or select from the menu above: ${NC}"
+            read -r input_VPN_PORT
+        fi
     else
         break
     fi
@@ -142,7 +149,6 @@ rm -rf /root/easy_wireguard/clients 2>/dev/null || true
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
 # Patch everything to latest version for security
-apt-get update -y
 apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq python3 golang git make
 
 echo -e "${GREEN}Compiling stealth wireguard-go...${NC}"
@@ -199,19 +205,19 @@ cat <<EOF > /etc/wireguard/wg0.conf
 [Interface]
 PrivateKey = $SERVER_PRIVATE
 Address = $SERVER_PRIVATE_IP/24
-ListenPort = $PORT
+ListenPort = ${INTERNAL_PORT:-$PORT}
 MTU = $MTU
 SaveConfig = false
 
 PostUp = ufw route allow in on wg0 out on $NETWORK_DEVICE
 PostUp = iptables -t nat -A POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
-PostUp = iptables -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud
+PostUp = iptables -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PostUp = iptables -t mangle -A POSTROUTING -o $NETWORK_DEVICE -j TTL --ttl-set 64
 PostUp = ip6tables -A FORWARD -i wg0 -j REJECT
 PostUp = ip6tables -A OUTPUT -o wg0 -j REJECT
 PreDown = ufw route delete allow in on wg0 out on $NETWORK_DEVICE
 PreDown = iptables -t nat -D POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
-PreDown = iptables -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud
+PreDown = iptables -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PreDown = iptables -t mangle -D POSTROUTING -o $NETWORK_DEVICE -j TTL --ttl-set 64
 PreDown = ip6tables -D FORWARD -i wg0 -j REJECT
 PreDown = ip6tables -D OUTPUT -o wg0 -j REJECT
@@ -263,6 +269,29 @@ if [[ "$HAS_BYPASS" == "true" && -f /root/easy_wireguard/domain_bypass.sh ]]; th
     echo -e "${GREEN}Calculating Split Tunneling AllowedIPs...${NC}"
     # Execute update_routes function or similar from domain_bypass.sh non-interactively
     bash /root/easy_wireguard/domain_bypass.sh --cli-update || true
+fi
+
+if [[ -n "${INTERNAL_PORT:-}" ]]; then
+    echo -e "${GREEN}Configuring Dokploy Traefik proxy for port 443 -> $INTERNAL_PORT...${NC}"
+    TRAEFIK_CONTAINER=$(docker ps -q -f name=dokploy-traefik | head -n 1)
+    TRAEFIK_NETWORK=$(docker inspect --format '{{json .NetworkSettings.Networks}}' "$TRAEFIK_CONTAINER" | jq -r 'keys[0]')
+    GATEWAY_IP=$(docker network inspect "$TRAEFIK_NETWORK" -f '{{(index .IPAM.Config 0).Gateway}}')
+    # Dynamically verify Dokploy Traefik is exposing UDP port 443 via standard Docker metadata
+    HAS_UDP_443=$(docker inspect "$TRAEFIK_CONTAINER" | jq -r '.[0].NetworkSettings.Ports | to_entries[] | select(.value != null and .value[0].HostPort == "443" and (.key | endswith("/udp"))) | .key')
+    if [[ -z "$HAS_UDP_443" ]]; then
+        echo -e "${RED}Error: dokploy-traefik is not exposing UDP port 443. Aborting dokploy integration.${NC}"
+        exit 1
+    fi
+    # Remove existing bridge container if it exists
+    docker rm -f wg-dokploy-bridge >/dev/null 2>&1 || true
+    # Start socat bridge container
+    # Omitting traefik.udp.routers.wg.entrypoints forces Traefik to attach to all available UDP entrypoints natively.
+    docker run -d --name wg-dokploy-bridge --network "$TRAEFIK_NETWORK" --restart always \
+        -l "traefik.enable=true" \
+        -l "traefik.udp.routers.wg.service=wg" \
+        -l "traefik.udp.services.wg.loadbalancer.server.port=$INTERNAL_PORT" \
+        alpine/socat udp-listen:"$INTERNAL_PORT",fork,reuseaddr udp-connect:"$GATEWAY_IP":"$INTERNAL_PORT" >/dev/null 2>&1
+    echo -e "${GREEN}Proxy container started!${NC}"
 fi
 
 echo -e "\n${PURPLE}======================================================${NC}"

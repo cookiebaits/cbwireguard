@@ -263,14 +263,11 @@ function installWireGuard() {
 
 	# Install WireGuard tools and module
 	if [[ ${OS} == 'ubuntu' ]] || [[ ${OS} == 'debian' && ${VERSION_ID} -gt 10 ]]; then
-		apt-get update
 		installPackages apt-get install -y wireguard iptables resolvconf qrencode
 	elif [[ ${OS} == 'debian' ]]; then
 		if ! grep -rqs "^deb .* buster-backports" /etc/apt/; then
 			echo "deb http://deb.debian.org/debian buster-backports main" >/etc/apt/sources.list.d/backports.list
-			apt-get update
 		fi
-		apt-get update
 		installPackages apt-get install -y iptables resolvconf qrencode
 		installPackages apt-get install -y -t buster-backports wireguard
 	elif [[ ${OS} == 'fedora' ]]; then
@@ -345,7 +342,7 @@ PostDown = firewall-cmd --zone=public --add-interface=${SERVER_WG_NIC} && firewa
 		echo "PostUp = iptables -I INPUT -p udp --dport ${SERVER_PORT} -j ACCEPT
 PostUp = iptables -I FORWARD -i ${SERVER_PUB_NIC} -o ${SERVER_WG_NIC} -j ACCEPT
 PostUp = iptables -I FORWARD -i ${SERVER_WG_NIC} -j ACCEPT
-PostUp = iptables -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud
+PostUp = iptables -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PostUp = iptables -t nat -A POSTROUTING -o ${SERVER_PUB_NIC} -j MASQUERADE
 PostUp = iptables -t mangle -A POSTROUTING -o ${SERVER_PUB_NIC} -j TTL --ttl-set 64
 PostUp = ip6tables -I FORWARD -i ${SERVER_WG_NIC} -j ACCEPT
@@ -353,7 +350,7 @@ PostUp = ip6tables -t nat -A POSTROUTING -o ${SERVER_PUB_NIC} -j MASQUERADE
 PostDown = iptables -D INPUT -p udp --dport ${SERVER_PORT} -j ACCEPT
 PostDown = iptables -D FORWARD -i ${SERVER_PUB_NIC} -o ${SERVER_WG_NIC} -j ACCEPT
 PostDown = iptables -D FORWARD -i ${SERVER_WG_NIC} -j ACCEPT
-PostDown = iptables -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud
+PostDown = iptables -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PostDown = iptables -t nat -D POSTROUTING -o ${SERVER_PUB_NIC} -j MASQUERADE
 PostDown = iptables -t mangle -D POSTROUTING -o ${SERVER_PUB_NIC} -j TTL --ttl-set 64
 PostDown = ip6tables -D FORWARD -i ${SERVER_WG_NIC} -j ACCEPT
