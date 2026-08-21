@@ -276,18 +276,18 @@ if [[ -n "${INTERNAL_PORT:-}" ]]; then
     TRAEFIK_CONTAINER=$(docker ps -q -f name=dokploy-traefik | head -n 1)
     TRAEFIK_NETWORK=$(docker inspect --format '{{json .NetworkSettings.Networks}}' "$TRAEFIK_CONTAINER" | jq -r 'keys[0]')
     GATEWAY_IP=$(docker network inspect "$TRAEFIK_NETWORK" -f '{{(index .IPAM.Config 0).Gateway}}')
-    # Dynamically find the Traefik entrypoint name mapped to port 443 by inspecting the container's traefik labels
-    TRAEFIK_ENTRYPOINT=$(docker inspect "$TRAEFIK_CONTAINER" | jq -r '.[0].Config.Labels | to_entries[] | select(.key | test("^traefik.http.routers.*.entrypoints$")) | .value' | head -n 1)
-    if [[ -z "$TRAEFIK_ENTRYPOINT" ]]; then
-        echo -e "${RED}Error: Could not dynamically extract Traefik entrypoint for port 443 from labels. Aborting dokploy integration.${NC}"
+    # Dynamically verify Dokploy Traefik is exposing UDP port 443 via standard Docker metadata
+    HAS_UDP_443=$(docker inspect "$TRAEFIK_CONTAINER" | jq -r '.[0].NetworkSettings.Ports | to_entries[] | select(.value != null and .value[0].HostPort == "443" and (.key | endswith("/udp"))) | .key')
+    if [[ -z "$HAS_UDP_443" ]]; then
+        echo -e "${RED}Error: dokploy-traefik is not exposing UDP port 443. Aborting dokploy integration.${NC}"
         exit 1
     fi
     # Remove existing bridge container if it exists
     docker rm -f wg-dokploy-bridge >/dev/null 2>&1 || true
     # Start socat bridge container
+    # Omitting traefik.udp.routers.wg.entrypoints forces Traefik to attach to all available UDP entrypoints natively.
     docker run -d --name wg-dokploy-bridge --network "$TRAEFIK_NETWORK" --restart always \
         -l "traefik.enable=true" \
-        -l "traefik.udp.routers.wg.entrypoints=$TRAEFIK_ENTRYPOINT" \
         -l "traefik.udp.routers.wg.service=wg" \
         -l "traefik.udp.services.wg.loadbalancer.server.port=$INTERNAL_PORT" \
         alpine/socat udp-listen:"$INTERNAL_PORT",fork,reuseaddr udp-connect:"$GATEWAY_IP":"$INTERNAL_PORT" >/dev/null 2>&1
