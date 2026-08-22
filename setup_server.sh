@@ -267,7 +267,7 @@ if [[ -n "${INTERNAL_PORT:-}" ]]; then
         -l "traefik.enable=true" \
         -l "traefik.udp.routers.wg.service=wg" \
         -l "traefik.udp.services.wg.loadbalancer.server.port=$INTERNAL_PORT" \
-        alpine/socat udp-listen:"$INTERNAL_PORT",fork,reuseaddr udp-connect:"$GATEWAY_IP":"$INTERNAL_PORT" >/dev/null 2>&1
+        alpine/socat -T 60 udp4-listen:"$INTERNAL_PORT",fork,reuseaddr udp4-connect:"$GATEWAY_IP":"$INTERNAL_PORT" >/dev/null 2>&1
     echo -e "${GREEN}Proxy container started!${NC}"
 fi
 
