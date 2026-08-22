@@ -182,6 +182,7 @@ cat <<EOF > /etc/wireguard/wg0.conf
 [Interface]
 PrivateKey = $SERVER_PRIVATE
 Address = $SERVER_PRIVATE_IP/24
+# ExternalPort = $PORT
 ListenPort = ${INTERNAL_PORT:-$PORT}
 MTU = $MTU
 SaveConfig = false
