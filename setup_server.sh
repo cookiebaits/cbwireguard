@@ -228,6 +228,9 @@ sysctl -p
 
 echo -e "${GREEN}Configuring UFW Firewall...${NC}"
 ufw allow "$PORT/udp"
+if [[ -n "${INTERNAL_PORT:-}" ]]; then
+    ufw allow "$INTERNAL_PORT/udp"
+fi
 ufw allow "$SSH_PORT/tcp"
 ufw --force enable
 
