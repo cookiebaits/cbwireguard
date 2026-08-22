@@ -69,7 +69,10 @@ get_public_ip() {
     dig +short myip.opendns.com @resolver1.opendns.com 2>/dev/null || echo "UNKNOWN_IP"
 }
 IP_ADR=$(get_public_ip)
-PORT=$(grep -i "^ListenPort" /etc/wireguard/wg0.conf | awk '{print $3}')
+PORT=$(grep -i "^# ExternalPort" /etc/wireguard/wg0.conf | awk '{print $4}')
+if [[ -z "$PORT" ]]; then
+    PORT=$(grep -i "^ListenPort" /etc/wireguard/wg0.conf | awk '{print $3}')
+fi
 # P3: Respect MTU from server config if it exists
 SERVER_MTU=$(grep -i "^MTU" /etc/wireguard/wg0.conf | awk '{print $3}' || echo "$MTU")
 MTU=${SERVER_MTU:-$MTU}
