@@ -42,8 +42,18 @@ encrypt_file() {
 decrypt_file_to_stdout() {
     local file="$1"
     get_master_pass
+    
+    if [[ -z "${MASTER_PASS:-}" ]]; then
+        unset MASTER_PASS
+        echo "FAILED_EMPTY"
+        return
+    fi
+    
     export MASTER_PASS
-    if ! openssl enc -aes-256-cbc -d -salt -pbkdf2 -pass env:MASTER_PASS -in "$file" 2>/dev/null; then
+    local out
+    if out=$(openssl enc -aes-256-cbc -d -salt -pbkdf2 -pass env:MASTER_PASS -in "$file" 2>/dev/null); then
+        echo "$out"
+    else
         unset MASTER_PASS
         echo "FAILED"
     fi
@@ -77,6 +87,9 @@ show_user() {
     if [[ -f "$file" ]]; then
         local content
         content=$(decrypt_file_to_stdout "$file")
+        if [[ "$content" == "FAILED_EMPTY" ]]; then
+            return
+        fi
         if [[ "$content" == "FAILED" ]]; then
             echo -e "${RED}Error: Decryption failed. Incorrect master password?${NC}"
         else
@@ -105,6 +118,9 @@ delete_user() {
     if [[ -f "$file" ]]; then
         local content
         content=$(decrypt_file_to_stdout "$file")
+        if [[ "$content" == "FAILED_EMPTY" ]]; then
+            return
+        fi
         if [[ "$content" == "FAILED" ]]; then
             echo -e "${RED}Error: Decryption failed.${NC}"
             return
@@ -141,6 +157,9 @@ edit_user() {
     if [[ -f "$file" ]]; then
         local content
         content=$(decrypt_file_to_stdout "$file")
+        if [[ "$content" == "FAILED_EMPTY" ]]; then
+            return
+        fi
         if [[ "$content" == "FAILED" ]]; then
             echo -e "${RED}Error: Decryption failed.${NC}"
             return
@@ -175,6 +194,9 @@ show_user_by_name() {
     if [[ -f "$file" ]]; then
         local content
         content=$(decrypt_file_to_stdout "$file")
+        if [[ "$content" == "FAILED_EMPTY" ]]; then
+            return
+        fi
         if [[ "$content" == "FAILED" ]]; then
             echo -e "${RED}Error: Decryption failed. Incorrect master password?${NC}"
         else
