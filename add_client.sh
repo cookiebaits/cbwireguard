@@ -120,10 +120,17 @@ wg set wg0 peer "$DEVICE_PUBLIC" allowed-ips "$CLIENT_IP/32"
 # P3: Encryption of client config
 get_master_pass() {
     if [[ -z "${MASTER_PASS:-}" ]]; then
-        echo -en "${GREEN}Enter Master Password for Client Encryption: ${NC}"
-        read -rs MASTER_PASS
-        echo
-        export MASTER_PASS
+        while true; do
+            echo -en "${GREEN}Enter Master Password for Client Encryption (min 4 chars): ${NC}"
+            read -rs MASTER_PASS
+            echo
+            if [[ ${#MASTER_PASS} -ge 4 ]]; then
+                export MASTER_PASS
+                break
+            else
+                echo -e "${RED}Password must be at least 4 characters long. Please try again.${NC}"
+            fi
+        done
     fi
 }
 
