@@ -45,6 +45,36 @@ print_banner() {
 
 clear
 print_banner
+
+# P1: Cleanup old instances before fresh install
+echo -e "${GREEN}Cleaning up any existing WireGuard instances...${NC}"
+active_wg_services=$(systemctl list-units --type=service --state=active | grep -o "wg-quick@.*\.service" || true)
+if [[ -n "$active_wg_services" ]]; then
+    for svc in $active_wg_services; do
+        systemctl stop "$svc"
+        systemctl disable "$svc"
+    done
+fi
+if systemctl is-active --quiet wg-quick@wg0.service; then
+    systemctl stop wg-quick@wg0.service
+    systemctl disable wg-quick@wg0.service
+fi
+sed -i '/net.ipv4.ip_forward=1/d' /etc/sysctl.conf
+while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 1; done
+apt-get purge -y wireguard wireguard-tools >/dev/null 2>&1 || true
+apt-get autoremove -y >/dev/null 2>&1 || true
+rm -rf /etc/wireguard
+rm -rf /root/easy_wireguard/clients 2>/dev/null || true
+
+echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
+# Patch everything to latest version for security
+apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq python3
+
+# Clean up any lingering wireguard-go stealth implementations to restore compatibility
+rm -f /usr/local/bin/wireguard-go
+rm -f /etc/systemd/system/wg-quick@wg0.service.d/override.conf
+systemctl daemon-reload
+
 echo -e "${PURPLE}┌────────────────────────────────────────────────────┐${NC}"
 echo -e "${PURPLE}│      VPN Port Selection (Recommended Stealthy)     │${NC}"
 echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
@@ -126,35 +156,6 @@ set_sysctl() {
 }
 
 SERVER_PRIVATE_IP="10.18.0.1"
-
-# P1: Cleanup old instances before fresh install
-echo -e "${GREEN}Cleaning up any existing WireGuard instances...${NC}"
-active_wg_services=$(systemctl list-units --type=service --state=active | grep -o "wg-quick@.*\.service" || true)
-if [[ -n "$active_wg_services" ]]; then
-    for svc in $active_wg_services; do
-        systemctl stop "$svc"
-        systemctl disable "$svc"
-    done
-fi
-if systemctl is-active --quiet wg-quick@wg0.service; then
-    systemctl stop wg-quick@wg0.service
-    systemctl disable wg-quick@wg0.service
-fi
-sed -i '/net.ipv4.ip_forward=1/d' /etc/sysctl.conf
-while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 1; done
-apt-get purge -y wireguard wireguard-tools >/dev/null 2>&1 || true
-apt-get autoremove -y >/dev/null 2>&1 || true
-rm -rf /etc/wireguard
-rm -rf /root/easy_wireguard/clients 2>/dev/null || true
-
-echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
-# Patch everything to latest version for security
-apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq python3
-
-# Clean up any lingering wireguard-go stealth implementations to restore compatibility
-rm -f /usr/local/bin/wireguard-go
-rm -f /etc/systemd/system/wg-quick@wg0.service.d/override.conf
-systemctl daemon-reload
 
 echo -e "${GREEN}Generating secure encryption keys...${NC}"
 mkdir -p /etc/wireguard
