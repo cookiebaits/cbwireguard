@@ -53,18 +53,41 @@ if [[ -n "$active_wg_services" ]]; then
     for svc in $active_wg_services; do
         systemctl stop "$svc"
         systemctl disable "$svc"
+        echo -e "${ORANGE}- Stopped and disabled service: $svc${NC}"
     done
 fi
 if systemctl is-active --quiet wg-quick@wg0.service; then
     systemctl stop wg-quick@wg0.service
     systemctl disable wg-quick@wg0.service
+    echo -e "${ORANGE}- Stopped and disabled service: wg-quick@wg0.service${NC}"
 fi
+
+if [[ -f /etc/wireguard/wg0.conf ]]; then
+    extracted_ports=$(grep -E '^(ListenPort|# ExternalPort)' /etc/wireguard/wg0.conf | awk -F'=' '{print $2}' | tr -d ' ')
+    for p in $extracted_ports; do
+        if [[ -n "$p" ]]; then
+            ufw delete allow "$p/udp" >/dev/null 2>&1 || true
+            echo -e "${ORANGE}- Removed firewall rules for port: $p/udp${NC}"
+        fi
+    done
+fi
+
+if command -v docker >/dev/null 2>&1; then
+    if docker ps -a --format '{{.Names}}' | grep -Eq "^wg-dokploy-bridge$"; then
+        docker rm -f wg-dokploy-bridge >/dev/null 2>&1 || true
+        echo -e "${ORANGE}- Removed docker container: wg-dokploy-bridge${NC}"
+    fi
+fi
+
 sed -i '/net.ipv4.ip_forward=1/d' /etc/sysctl.conf
 while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 1; done
 apt-get purge -y wireguard wireguard-tools >/dev/null 2>&1 || true
 apt-get autoremove -y >/dev/null 2>&1 || true
+echo -e "${ORANGE}- Removed packages: wireguard wireguard-tools${NC}"
+
 rm -rf /etc/wireguard
 rm -rf /root/easy_wireguard/clients 2>/dev/null || true
+echo -e "${ORANGE}- Removed directories: /etc/wireguard, /root/easy_wireguard/clients${NC}"
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
 # Patch everything to latest version for security
