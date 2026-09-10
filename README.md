@@ -13,12 +13,14 @@ This wrapper dynamically pulls the latest scripts from GitHub, ensuring your ser
 - [Adding a New Client (Option 2)](#-adding-a-new-client-option-2)
 - [Managing Clients (Options 3 & 4)](#-managing-clients-options-3--4)
 - [Backup & Restore Manager (Option 5)](#-backup--restore-manager-option-5)
-- [Removing the Server (Option 6)](#%EF%B8%8F-removing-the-server-option-6)
+- [Geo-IP & Anti-VPN Shield (Option 7)](#-geo-ip--anti-vpn-shield-option-7)
+- [Removing the Server (Option r)](#%EF%B8%8F-removing-the-server-option-r)
 
 ---
 
 ## 🚀 Key Feature Upgrades
 
+- **Geo-IP & Anti-VPN Firewall Shield:** Restricts incoming WireGuard connections strictly to the **USA and Canada**, while blocking commercial VPNs (NordVPN, ExpressVPN, etc.), datacenter subnets, and cloud hosting providers (AWS, GCP, DigitalOcean, Hetzner, M247) to prevent attackers from stacking VPNs or disguising foreign traffic.
 - **Enhanced Stealth & Bypassing:** Dynamically configure MTU, DNS, and AllowedIPs (split-tunneling) to bypass streaming service detection and restrictive firewalls.
 - **Dokploy Traefik Integration:** Seamlessly funnels UDP WireGuard traffic through a proxy bridge if standard port 443 is in use by a Traefik reverse proxy.
 - **Domain-Based Split Tunneling:** Bypass specific domains from the VPN tunnel in real-time.
@@ -84,7 +86,13 @@ You can now customize global defaults for all future clients:
 - **Default DNS:** Set to a high-privacy, ad-blocking DNS cluster.
 - **Default Allowed IPs:** Configured as `0.0.0.0/1, 128.0.0.0/1` by default to increase stealth.
 
-## 🗑️ Step 7: Removing the Server (Option r)
+## 🛡️ Step 7: Geo-IP & Anti-VPN Shield (Option 7)
+Manage foreign connection restrictions and anti-VPN firewall rules:
+- **Status Check:** Displays current active firewall engine (`kernel ipset` or `iptables chains`), count of allowed US/CA subnets, count of blocked VPN/datacenter subnets, and active WireGuard port protection status.
+- **Update Databases:** Automatically fetches and caches the latest official US/CA zone files and commercial VPN/datacenter blocklists.
+- **Manual Whitelist / Blacklist:** Allows administrators to manually whitelist or blacklist custom IP addresses or CIDRs.
+
+## 🗑️ Step 8: Removing the Server (Option r)
 If you need to start fresh or remove the VPN, this option executes a total system wipe.
 
 Safely stops the systemd service.

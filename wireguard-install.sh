@@ -217,12 +217,12 @@ function installWireGuard() {
 
 	# Install WireGuard tools and module
 	if [[ ${OS} == 'ubuntu' ]] || [[ ${OS} == 'debian' && ${VERSION_ID} -gt 10 ]]; then
-		installPackages apt-get install -y wireguard iptables resolvconf qrencode
+		installPackages apt-get install -y wireguard iptables resolvconf qrencode ipset
 	elif [[ ${OS} == 'debian' ]]; then
 		if ! grep -rqs "^deb .* buster-backports" /etc/apt/; then
 			echo "deb http://deb.debian.org/debian buster-backports main" >/etc/apt/sources.list.d/backports.list
 		fi
-		installPackages apt-get install -y iptables resolvconf qrencode
+		installPackages apt-get install -y iptables resolvconf qrencode ipset
 		installPackages apt-get install -y -t buster-backports wireguard
 	elif [[ ${OS} == 'fedora' ]]; then
 		if [[ ${VERSION_ID} -lt 32 ]]; then
@@ -230,25 +230,25 @@ function installWireGuard() {
 			dnf copr enable -y jdoss/wireguard
 			installPackages dnf install -y wireguard-dkms
 		fi
-		installPackages dnf install -y wireguard-tools iptables qrencode
+		installPackages dnf install -y wireguard-tools iptables qrencode ipset
 	elif [[ ${OS} == 'centos' ]] || [[ ${OS} == 'almalinux' ]] || [[ ${OS} == 'rocky' ]]; then
 		if [[ ${VERSION_ID} == 8* ]]; then
 			installPackages yum install -y epel-release elrepo-release
 			installPackages yum install -y kmod-wireguard
 			yum install -y qrencode || true # not available on release 9
 		fi
-		installPackages yum install -y wireguard-tools iptables
+		installPackages yum install -y wireguard-tools iptables ipset
 	elif [[ ${OS} == 'oracle' ]]; then
 		installPackages dnf install -y oraclelinux-developer-release-el8
 		dnf config-manager --disable -y ol8_developer
 		dnf config-manager --enable -y ol8_developer_UEKR6
 		dnf config-manager --save -y --setopt=ol8_developer_UEKR6.includepkgs='wireguard-tools*'
-		installPackages dnf install -y wireguard-tools qrencode iptables
+		installPackages dnf install -y wireguard-tools qrencode iptables ipset
 	elif [[ ${OS} == 'arch' ]]; then
-		installPackages pacman -S --needed --noconfirm wireguard-tools qrencode
+		installPackages pacman -S --needed --noconfirm wireguard-tools qrencode ipset
 	elif [[ ${OS} == 'alpine' ]]; then
 		apk update
-		installPackages apk add wireguard-tools iptables libqrencode-tools
+		installPackages apk add wireguard-tools iptables libqrencode-tools ipset
 	fi
 
 	# Verify WireGuard installation
