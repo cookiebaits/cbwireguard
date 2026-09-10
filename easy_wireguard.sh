@@ -86,6 +86,7 @@ display_menu() {
 [4] Backup & Restore Manager
 [5] Domain-Based Split Tunneling
 [6] Real-Time Logging (Errors)
+[7] Geo-IP & Anti-VPN Shield (US/CA Only)
 [s] Settings (MTU, DNS, AllowedIPs)
 ${RED}[r] Remove WireGuard server from this system${GREEN}
 [q] Exit
@@ -148,6 +149,7 @@ print_menu() {
     echo -e "${PURPLE}│ ${NC}[4] Backup & Restore Manager                      ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${NC}[5] Domain-Based Split Tunneling                  ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${NC}[6] Real-Time Logging (Errors)                    ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[7] Geo-IP & Anti-VPN Shield (US/CA Only)         ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${NC}[s] Settings (MTU, DNS, AllowedIPs)               ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${RED}[r] Remove WireGuard server from this system      ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${NC}[q] Exit                                          ${PURPLE}│${NC}"
@@ -176,6 +178,7 @@ main() {
                 echo -en "\n${GREEN}Press Enter to continue...${NC}"
                 read -r
                 ;;
+            7) fetch_and_run "geo_vpn_filter.sh" ;;
             s) settings_menu ;;
             r)
                 fetch_and_run "remove_server.sh"

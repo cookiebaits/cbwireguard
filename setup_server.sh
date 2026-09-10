@@ -91,7 +91,14 @@ echo -e "${ORANGE}- Removed directories: /etc/wireguard, /root/easy_wireguard/cl
 
 echo -e "${GREEN}Installing WireGuard and required dependencies...${NC}"
 # Patch everything to latest version for security
-apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq python3
+apt-get install -y wireguard ufw dnsutils qrencode iptables iproute2 jq python3 ipset
+
+# Ensure easy_wireguard directory and geo_vpn_filter.sh script are present
+mkdir -p /root/easy_wireguard
+if [[ -f "./geo_vpn_filter.sh" ]]; then
+    cp ./geo_vpn_filter.sh /root/easy_wireguard/geo_vpn_filter.sh
+    chmod +x /root/easy_wireguard/geo_vpn_filter.sh
+fi
 
 # Clean up any lingering wireguard-go stealth implementations to restore compatibility
 rm -f /usr/local/bin/wireguard-go
@@ -217,6 +224,8 @@ PostUp = iptables -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-
 PostUp = iptables -t mangle -A POSTROUTING -o $NETWORK_DEVICE -j TTL --ttl-set 64
 PostUp = ip6tables -A FORWARD -i wg0 -j REJECT
 PostUp = ip6tables -A OUTPUT -o wg0 -j REJECT
+PostUp = /root/easy_wireguard/geo_vpn_filter.sh --apply
+PreDown = /root/easy_wireguard/geo_vpn_filter.sh --remove
 PreDown = ufw route delete allow in on wg0 out on $NETWORK_DEVICE
 PreDown = iptables -t nat -D POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
 PreDown = iptables -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
@@ -269,6 +278,11 @@ if ! systemctl restart wg-quick@wg0.service; then
     exit 1
 fi
 systemctl status --no-pager -l wg-quick@wg0.service
+
+echo -e "${GREEN}Initializing Geo-IP (US/CA Only) & Anti-VPN Protection...${NC}"
+if [[ -f /root/easy_wireguard/geo_vpn_filter.sh ]]; then
+    bash /root/easy_wireguard/geo_vpn_filter.sh --update || true
+fi
 
 if [[ "$HAS_BYPASS" == "true" && -f /root/easy_wireguard/domain_bypass.sh ]]; then
     echo -e "${GREEN}Calculating Split Tunneling AllowedIPs...${NC}"
