@@ -114,8 +114,9 @@ echo -e "${PURPLE}│ ${NC}[3] 123 (NTP)                                    ${PU
 echo -e "${PURPLE}│ ${NC}[4] 1194 (OpenVPN UDP)                           ${PURPLE}│${NC}"
 echo -e "${PURPLE}│ ${NC}[5] 500 (ISAKMP)                                  ${PURPLE}│${NC}"
 echo -e "${PURPLE}│ ${NC}[6] 4500 (IPsec NAT-T)                            ${PURPLE}│${NC}"
+echo -e "${PURPLE}│ ${NC}[7] 8888 (Unconventional High Port - Stealthy)   ${PURPLE}│${NC}"
 echo -e "${PURPLE}└────────────────────────────────────────────────────┘${NC}"
-echo -en "${PURPLE}Select option [1-6] or enter custom port [Default 443]: ${NC}"
+echo -en "${PURPLE}Select option [1-7] or enter custom port [Default 443]: ${NC}"
 read -r input_VPN_PORT
 
 while true; do
@@ -126,6 +127,7 @@ while true; do
         4) PORT="1194" ;;
         5) PORT="500" ;;
         6) PORT="4500" ;;
+        7) PORT="8888" ;;
     "") PORT="443" ;;
         *)
             if [[ "$input_VPN_PORT" =~ ^[0-9]+$ ]]; then

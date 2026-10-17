@@ -50,7 +50,8 @@ SERVICE_MAP = {
     "openai.com": ["chatgpt.com", "openai.com", "auth0.com", "challenges.cloudflare.com", "api.openai.com"],
     "ticketmaster.com": ["ticketmaster.com", "livenation.com", "tmclient.ticketmaster.com"],
     "chase.com": ["chase.com", "chasecdn.com"],
-    "bankofamerica.com": ["bankofamerica.com", "bofa.com", "bankofamerica.com.akadns.net"]
+    "bankofamerica.com": ["bankofamerica.com", "bofa.com", "bankofamerica.com.akadns.net"],
+    "linkedin.com": ["linkedin.com", "licdn.com", "linkedin.cn", "lnkd.in"]
 }
 
 def resolve_domain(domain):

@@ -165,9 +165,10 @@ function installQuestions() {
 	echo "   7) 3389 (RDP - Stealthy)"
 	echo "   8) 8080 (HTTP Alt - Stealthy)"
 	echo "   9) 8443 (HTTPS Alt - Stealthy)"
-	echo "   10) Custom / Random"
+	echo "   10) 8888 (Unconventional High Port - Stealthy)"
+	echo "   11) Custom / Random"
 
-	read -rp "Select an option [1-10]: " PORT_OPTION
+	read -rp "Select an option [1-11]: " PORT_OPTION
 	case "${PORT_OPTION}" in
 		1) SERVER_PORT=51820 ;;
 		2) SERVER_PORT=53 ;;
@@ -178,7 +179,8 @@ function installQuestions() {
 		7) SERVER_PORT=3389 ;;
 		8) SERVER_PORT=8080 ;;
 		9) SERVER_PORT=8443 ;;
-		10|*)
+		10) SERVER_PORT=8888 ;;
+		11|*)
 			RANDOM_PORT=$(shuf -i49152-65535 -n1)
 			until [[ ${SERVER_PORT} =~ ^[0-9]+$ ]] && [ "${SERVER_PORT}" -ge 1 ] && [ "${SERVER_PORT}" -le 65535 ]; do
 				read -rp "Server WireGuard port [1-65535]: " -e -i "${RANDOM_PORT}" SERVER_PORT
