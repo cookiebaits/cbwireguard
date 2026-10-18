@@ -67,6 +67,7 @@ if [[ -f /etc/wireguard/wg0.conf ]]; then
     for p in $extracted_ports; do
         if [[ -n "$p" ]]; then
             ufw delete allow "$p/udp" >/dev/null 2>&1 || true
+            iptables -D INPUT -p udp --dport "$p" -j ACCEPT >/dev/null 2>&1 || true
             echo -e "${ORANGE}- Removed firewall rules for port: $p/udp${NC}"
         fi
     done
@@ -106,36 +107,46 @@ rm -f /etc/systemd/system/wg-quick@wg0.service.d/override.conf
 systemctl daemon-reload
 
 echo -e "${PURPLE}┌────────────────────────────────────────────────────┐${NC}"
-echo -e "${PURPLE}│      VPN Port Selection (Recommended Stealthy)     │${NC}"
+echo -e "${PURPLE}│   VPN Port Selection (Recommended Stealthy Ports)  │${NC}"
 echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
-echo -e "${PURPLE}│ ${NC}[1] 443 (HTTPS/QUIC - Most Stealthy)             ${PURPLE}│${NC}"
-echo -e "${PURPLE}│ ${NC}[2] 53 (DNS)                                     ${PURPLE}│${NC}"
-echo -e "${PURPLE}│ ${NC}[3] 123 (NTP)                                    ${PURPLE}│${NC}"
-echo -e "${PURPLE}│ ${NC}[4] 1194 (OpenVPN UDP)                           ${PURPLE}│${NC}"
-echo -e "${PURPLE}│ ${NC}[5] 500 (ISAKMP)                                  ${PURPLE}│${NC}"
-echo -e "${PURPLE}│ ${NC}[6] 4500 (IPsec NAT-T)                            ${PURPLE}│${NC}"
+echo -e "${PURPLE}│ ${NC}[1] 1194 (OpenVPN UDP - Recommended Stealthy)    ${PURPLE}│${NC}"
+echo -e "${PURPLE}│ ${NC}[2] 53 (DNS UDP)                                 ${PURPLE}│${NC}"
+echo -e "${PURPLE}│ ${NC}[3] 123 (NTP UDP)                                ${PURPLE}│${NC}"
+echo -e "${PURPLE}│ ${NC}[4] 500 (ISAKMP UDP)                             ${PURPLE}│${NC}"
+echo -e "${PURPLE}│ ${NC}[5] 4500 (IPsec NAT-T UDP)                       ${PURPLE}│${NC}"
+echo -e "${PURPLE}│ ${NC}[6] 3389 (RDP UDP)                               ${PURPLE}│${NC}"
+echo -e "${PURPLE}│ ${NC}[7] 3478 (STUN UDP)                               ${PURPLE}│${NC}"
+echo -e "${PURPLE}│ ${NC}[8] 5060 (SIP UDP)                               ${PURPLE}│${NC}"
+echo -e "${PURPLE}│ ${NC}[9] 8888 (High-Port Stealth)                     ${PURPLE}│${NC}"
 echo -e "${PURPLE}└────────────────────────────────────────────────────┘${NC}"
-echo -en "${PURPLE}Select option [1-6] or enter custom port [Default 443]: ${NC}"
+echo -en "${PURPLE}Select option [1-9] or enter custom port [Default 1194]: ${NC}"
 read -r input_VPN_PORT
 
 while true; do
     case "$input_VPN_PORT" in
-        1) PORT="443" ;;
+        1) PORT="1194" ;;
         2) PORT="53" ;;
         3) PORT="123" ;;
-        4) PORT="1194" ;;
-        5) PORT="500" ;;
-        6) PORT="4500" ;;
-    "") PORT="443" ;;
+        4) PORT="500" ;;
+        5) PORT="4500" ;;
+        6) PORT="3389" ;;
+        7) PORT="3478" ;;
+        8) PORT="5060" ;;
+        9) PORT="8888" ;;
+    "") PORT="1194" ;;
         *)
-            if [[ "$input_VPN_PORT" =~ ^[0-9]+$ ]]; then
+            if [[ "$input_VPN_PORT" =~ ^[0-9]+$ ]] && [ "$input_VPN_PORT" -ge 1 ] && [ "$input_VPN_PORT" -le 65535 ]; then
                 PORT="$input_VPN_PORT"
             else
-                PORT="443"
-                echo -e "${RED}Invalid input. Defaulting to 443.${NC}"
+                PORT="1194"
+                echo -e "${RED}Invalid input. Defaulting to 1194.${NC}"
             fi
             ;;
     esac
+
+    if [[ "$PORT" == "80" || "$PORT" == "443" ]]; then
+        echo -e "${ORANGE}Warning: Port ${PORT} is a sensitive web port heavily used by web servers/proxies.${NC}"
+    fi
 
     if check_port_usage "$PORT"; then
         if [[ "$PORT" == "443" ]] && docker ps -q -f name=dokploy-traefik >/dev/null 2>&1; then

@@ -63,7 +63,7 @@ get_wireguard_ports() {
     fi
 
     if [[ ${#ports[@]} -eq 0 ]]; then
-        ports=(443 51820)
+        ports=(1194 51820)
     fi
 
     echo "${ports[@]}"

@@ -49,7 +49,7 @@ curl -sSfL https://raw.githubusercontent.com/cookiebaits/cbwireguard/main/easy_w
 ## ⚙️ Step 2: Setting up the Server (Option 1)
 The script will ask you to define your ports:
 
-WireGuard VPN Port: Enter a custom port (1024-65535) or leave it blank to let the script generate a secure, randomized high port.
+WireGuard VPN Port: Select from a list of stealthy, non-common ports (such as 1194 OpenVPN, 53 DNS, 123 NTP, 500 ISAKMP, 4500 IPsec NAT-T, 3389 RDP, 3478 STUN, 5060 SIP, or 8888) or enter a custom port. Common sensitive web ports (such as 80 and 443) are avoided by default during installation to prevent conflicts with active web servers.
 
 SSH Port: Enter your custom SSH port (or leave blank for the default 22) so the firewall doesn't lock you out.
 

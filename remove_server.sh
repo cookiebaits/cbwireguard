@@ -52,14 +52,34 @@ if [[ "$FLAG" =~ ^[Yy]$ ]]; then
     # Suppress output of sysctl to keep the terminal clean
     sysctl -p &> /dev/null
 
-    # 3. Completely wipe the packages
+    # 3. Remove firewall rules and proxy containers for configured ports
+    echo -e "${GREEN}Cleaning up firewall rules and proxy containers...${NC}"
+    if [[ -f /etc/wireguard/wg0.conf ]]; then
+        extracted_ports=$(grep -E '^(ListenPort|# ExternalPort)' /etc/wireguard/wg0.conf | awk -F'=' '{print $2}' | tr -d ' ' || true)
+        for p in $extracted_ports; do
+            if [[ -n "$p" ]]; then
+                ufw delete allow "$p/udp" >/dev/null 2>&1 || true
+                iptables -D INPUT -p udp --dport "$p" -j ACCEPT >/dev/null 2>&1 || true
+                echo -e "${GREEN}- Removed firewall rule for port: $p/udp${NC}"
+            fi
+        done
+    fi
+
+    if command -v docker >/dev/null 2>&1; then
+        if docker ps -a --format '{{.Names}}' | grep -Eq "^wg-dokploy-bridge$"; then
+            docker rm -f wg-dokploy-bridge >/dev/null 2>&1 || true
+            echo -e "${GREEN}- Removed docker container: wg-dokploy-bridge${NC}"
+        fi
+    fi
+
+    # 4. Completely wipe the packages
     echo -e "${GREEN}Uninstalling WireGuard...${NC}"
     # Purge destroys the app configurations; autoremove cleans up unused dependencies
     while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 1; done
     apt-get purge -y wireguard wireguard-tools wireguard-dkms wireguard-go qrencode >/dev/null 2>&1 || true
     apt-get autoremove -y >/dev/null 2>&1 || true
 
-    # 4. Destroy the sensitive keys and configuration directory
+    # 5. Destroy the sensitive keys and configuration directory
     echo -e "${GREEN}Deleting WireGuard keys and config directories...${NC}"
     rm -rf /etc/wireguard
 

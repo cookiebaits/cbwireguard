@@ -156,35 +156,42 @@ function installQuestions() {
 
 	echo ""
 	echo "Select a WireGuard port:"
-	echo "   1) 51820 (Standard WireGuard)"
-	echo "   2) 53 (DNS - Stealthy)"
-	echo "   3) 123 (NTP - Stealthy)"
-	echo "   4) 443 (HTTPS - Stealthy/QUIC)"
-	echo "   5) 80 (HTTP - Stealthy)"
-	echo "   6) 1194 (OpenVPN Default - Stealthy)"
-	echo "   7) 3389 (RDP - Stealthy)"
-	echo "   8) 8080 (HTTP Alt - Stealthy)"
-	echo "   9) 8443 (HTTPS Alt - Stealthy)"
-	echo "   10) Custom / Random"
+	echo "   1) 1194 (OpenVPN UDP - Recommended Stealthy)"
+	echo "   2) 53 (DNS UDP - Stealthy)"
+	echo "   3) 123 (NTP UDP - Stealthy)"
+	echo "   4) 500 (ISAKMP UDP - Stealthy)"
+	echo "   5) 4500 (IPsec NAT-T UDP - Stealthy)"
+	echo "   6) 3389 (RDP UDP - Stealthy)"
+	echo "   7) 3478 (STUN UDP - Stealthy)"
+	echo "   8) 5060 (SIP UDP - Stealthy)"
+	echo "   9) 8888 (High-Port Stealth)"
+	echo "   10) 51820 (Standard WireGuard)"
+	echo "   11) Custom / Random"
 
-	read -rp "Select an option [1-10]: " PORT_OPTION
+	read -rp "Select an option [1-11]: " PORT_OPTION
 	case "${PORT_OPTION}" in
-		1) SERVER_PORT=51820 ;;
+		1) SERVER_PORT=1194 ;;
 		2) SERVER_PORT=53 ;;
 		3) SERVER_PORT=123 ;;
-		4) SERVER_PORT=443 ;;
-		5) SERVER_PORT=80 ;;
-		6) SERVER_PORT=1194 ;;
-		7) SERVER_PORT=3389 ;;
-		8) SERVER_PORT=8080 ;;
-		9) SERVER_PORT=8443 ;;
-		10|*)
+		4) SERVER_PORT=500 ;;
+		5) SERVER_PORT=4500 ;;
+		6) SERVER_PORT=3389 ;;
+		7) SERVER_PORT=3478 ;;
+		8) SERVER_PORT=5060 ;;
+		9) SERVER_PORT=8888 ;;
+		10) SERVER_PORT=51820 ;;
+		11|*)
 			RANDOM_PORT=$(shuf -i49152-65535 -n1)
 			until [[ ${SERVER_PORT} =~ ^[0-9]+$ ]] && [ "${SERVER_PORT}" -ge 1 ] && [ "${SERVER_PORT}" -le 65535 ]; do
 				read -rp "Server WireGuard port [1-65535]: " -e -i "${RANDOM_PORT}" SERVER_PORT
 			done
 		;;
 	esac
+
+	if ss -lnup 2>/dev/null | grep -q ":${SERVER_PORT} "; then
+		echo -e "${RED}Error: Port ${SERVER_PORT} is already in use by another process!${NC}"
+		exit 1
+	fi
 
 	# Cloudflare DNS by default
 	until [[ ${CLIENT_DNS_1} =~ ^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$ ]]; do
@@ -610,6 +617,18 @@ function uninstallWg() {
 			(cd qrencode-4.1.1 || exit && make uninstall)
 			rm -rf qrencode-* || exit
 			apk del wireguard-tools libqrencode libqrencode-tools
+		fi
+
+		if [[ -n "${SERVER_PORT:-}" ]]; then
+			iptables -D INPUT -p udp --dport "${SERVER_PORT}" -j ACCEPT 2>/dev/null || true
+			ufw delete allow "${SERVER_PORT}/udp" 2>/dev/null || true
+		fi
+		if [[ -f "/etc/wireguard/${SERVER_WG_NIC}.conf" ]]; then
+			extracted_port=$(grep -E 'ListenPort' "/etc/wireguard/${SERVER_WG_NIC}.conf" | awk -F'=' '{print $2}' | tr -d ' ' || true)
+			if [[ -n "$extracted_port" ]]; then
+				iptables -D INPUT -p udp --dport "$extracted_port" -j ACCEPT 2>/dev/null || true
+				ufw delete allow "$extracted_port/udp" 2>/dev/null || true
+			fi
 		fi
 
 		rm -rf /etc/wireguard
