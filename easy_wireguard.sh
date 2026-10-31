@@ -1,3 +1,4 @@
+cat << 'EOF' > wg-stealth-deploy.sh
 #!/usr/bin/env bash
 # ==============================================================================
 # WIREGUARD STEALTH & SPEED SERVER DEPLOYMENT (STANDALONE EDITION)
@@ -6,7 +7,6 @@
 
 set -e
 
-# Colors for menu formatting
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
@@ -20,7 +20,6 @@ CONF_FILE="${WG_DIR}/wg0.conf"
 STATE_FILE="${WG_DIR}/stealth_state.env"
 
 # Unique, non-standard UDP ports (Avoids 80, 443, 53, 51820, 8080, 8443)
-# Mapped to blend in with high-ephemeral QUIC/WebRTC/gaming telemetry ranges
 PRIMARY_PORT=47984
 STEALTH_PORTS=(34872 41956 47984 53281 58914 62749)
 
@@ -36,8 +35,16 @@ get_wan_iface() {
 }
 
 get_public_ip() {
-    curl -s4 --max-time 5 https://icanhazip.com || \
-    curl -s4 --max-time 5 https://ifconfig.me || \
+    local ip=""
+    # Hardened multi-fallback IP lookup without -f to prevent curl exit code 22
+    for url in "https://api.ipify.org" "https://icanhazip.com" "https://ifconfig.me/ip" "https://checkip.amazonaws.com"; do
+        ip=$(curl -s4 --max-time 4 "$url" 2>/dev/null | tr -d '[:space:]')
+        if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "$ip"
+            return 0
+        fi
+    done
+    # Fallback to interface IP if all external endpoints are blocked
     ip -4 addr show "$(get_wan_iface)" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1
 }
 
@@ -50,7 +57,8 @@ install_base_packages() {
 
 configure_local_dns_override() {
     echo -e "${CYAN}[*] Configuring internal Unbound DNS for strict Location Override...${NC}"
-    cat <<EOF > /etc/unbound/unbound.conf.d/wg-stealth.conf
+    mkdir -p /etc/unbound/unbound.conf.d
+    cat <<INNER_EOF > /etc/unbound/unbound.conf.d/wg-stealth.conf
 server:
     num-threads: 2
     interface: 10.66.66.1
@@ -70,26 +78,20 @@ server:
 forward-zone:
     name: "."
     forward-tls-upstream: yes
-    # Cloudflare & Quad9 DNS-over-TLS routed strictly through server egress
     forward-addr: 1.1.1.1@853#cloudflare-dns.com
     forward-addr: 9.9.9.9@853#dns.quad9.net
-EOF
+INNER_EOF
     systemctl enable unbound > /dev/null 2>&1 || true
     systemctl restart unbound || true
 }
 
 apply_speed_and_stealth_sysctl() {
     echo -e "${CYAN}[*] Applying kernel BBR speed optimizations & stealth stack hardening...${NC}"
-    cat <<EOF > /etc/sysctl.d/99-wg-stealth-speed.conf
-# --- Routing & Location Override ---
+    cat <<INNER_EOF > /etc/sysctl.d/99-wg-stealth-speed.conf
 net.ipv4.ip_forward = 1
 net.ipv6.conf.all.forwarding = 1
-
-# --- BBR Congestion Control & High-Speed Queueing ---
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
-
-# --- High-Throughput UDP Buffer Tuning (For WireGuard Speed) ---
 net.core.rmem_max = 67108864
 net.core.wmem_max = 67108864
 net.core.rmem_default = 2097152
@@ -98,8 +100,6 @@ net.core.optmem_max = 65536
 net.core.netdev_max_backlog = 250000
 net.ipv4.udp_rmem_min = 16384
 net.ipv4.udp_wmem_min = 16384
-
-# --- Server-Side Stealth & Fingerprint Obfuscation ---
 net.ipv4.icmp_echo_ignore_broadcasts = 1
 net.ipv4.icmp_ignore_bogus_error_responses = 1
 net.ipv4.tcp_timestamps = 0
@@ -109,7 +109,7 @@ net.ipv4.conf.all.accept_source_route = 0
 net.ipv4.conf.default.accept_source_route = 0
 net.ipv4.conf.all.send_redirects = 0
 net.ipv4.conf.default.send_redirects = 0
-EOF
+INNER_EOF
     sysctl --system > /dev/null 2>&1
 }
 
@@ -134,29 +134,28 @@ deploy_server() {
 
     PORT_CSV=$(IFS=,; echo "${STEALTH_PORTS[*]}")
 
-    cat <<EOF > "${STATE_FILE}"
+    cat <<INNER_EOF > "${STATE_FILE}"
 WAN_IFACE="${WAN_IFACE}"
 SERVER_IP="${SERVER_IP}"
 PRIMARY_PORT="${PRIMARY_PORT}"
 PORT_CSV="${PORT_CSV}"
 SERVER_PUB_KEY="${SERVER_PUB_KEY}"
-EOF
+INNER_EOF
 
     echo -e "${CYAN}[*] Generating Server wg0.conf with embedded Stealth & Speed hooks...${NC}"
 
-    cat <<EOF > "${CONF_FILE}"
+    cat <<INNER_EOF > "${CONF_FILE}"
 [Interface]
 Address = 10.66.66.1/24, fd42:42:42::1/64
 ListenPort = ${PRIMARY_PORT}
 PrivateKey = ${SERVER_PRIV_KEY}
 MTU = 1380
 
-# --- POST-UP: Speed, Stealth Packet Mangling, Port-Hopping & Location Override ---
-# 1. Multi-Port Stealth Hopping (Maps unique UDP ports ${PORT_CSV} -> ${PRIMARY_PORT})
+# 1. Multi-Port Stealth Hopping
 PostUp = iptables -t nat -A PREROUTING -i ${WAN_IFACE} -p udp -m multiport --dports ${PORT_CSV} -j REDIRECT --to-ports ${PRIMARY_PORT}
 PostUp = ip6tables -t nat -A PREROUTING -i ${WAN_IFACE} -p udp -m multiport --dports ${PORT_CSV} -j REDIRECT --to-ports ${PRIMARY_PORT}
 
-# 2. Strict Location Override & DNS Leak Interception (Forces all DNS to local tunnel resolver)
+# 2. Strict Location Override & DNS Leak Interception
 PostUp = iptables -t nat -A PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 10.66.66.1:53
 PostUp = iptables -t nat -A PREROUTING -i wg0 -p tcp --dport 53 -j DNAT --to-destination 10.66.66.1:53
 PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o wg0 -j ACCEPT
@@ -164,15 +163,15 @@ PostUp = iptables -t nat -A POSTROUTING -s 10.66.66.0/24 -o ${WAN_IFACE} -j MASQ
 PostUp = ip6tables -A FORWARD -i wg0 -j ACCEPT; ip6tables -A FORWARD -o wg0 -j ACCEPT
 PostUp = ip6tables -t nat -A POSTROUTING -s fd42:42:42::/64 -o ${WAN_IFACE} -j MASQUERADE
 
-# 3. Speed & Anti-Fragmentation: Dynamic TCP MSS Clamping
+# 3. Dynamic TCP MSS Clamping
 PostUp = iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PostUp = ip6tables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 
-# 4. Server-Side Stealth: TTL Normalization (Hides VPN Sub-Hop) & DSCP Scrubbing
+# 4. Server-Side Stealth: TTL Normalization & DSCP Scrubbing
 PostUp = iptables -t mangle -A POSTROUTING -o ${WAN_IFACE} -j TTL --ttl-set 64
 PostUp = iptables -t mangle -A POSTROUTING -o ${WAN_IFACE} -p udp -j DSCP --set-dscp 0
 
-# 5. Kernel Traffic Shaping: High-Speed FQ with Micro-Jitter to Defeat DPI Timing Heuristics
+# 5. Kernel Traffic Shaping
 PostUp = tc qdisc replace dev wg0 root fq maxrate 10gbit
 
 # --- POST-DOWN: Clean Teardown ---
@@ -188,13 +187,13 @@ PostDown = iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMS
 PostDown = ip6tables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PostDown = iptables -t mangle -D POSTROUTING -o ${WAN_IFACE} -j TTL --ttl-set 64
 PostDown = iptables -t mangle -D POSTROUTING -o ${WAN_IFACE} -p udp -j DSCP --set-dscp 0
-EOF
+INNER_EOF
 
     chmod 600 "${CONF_FILE}"
     systemctl enable wg-quick@wg0 > /dev/null 2>&1
     systemctl restart wg-quick@wg0
 
-    echo -e "${GREEN}[+] Server deployed and running!${NC}"
+    echo -e "${GREEN}[+] Server deployed and running on IP: ${SERVER_IP}${NC}"
     echo -e "${YELLOW}[i] Active Unique Stealth UDP Ports:${NC} ${STEALTH_PORTS[*]}"
 }
 
@@ -243,7 +242,6 @@ add_client() {
         CHOSEN_PORT="${PRIMARY_PORT}"
     fi
 
-    # Find next available IP octet (starts at 10.66.66.2)
     LAST_OCTET=1
     while grep -q "10.66.66.$((LAST_OCTET + 1))/32" "${CONF_FILE}"; do
         ((LAST_OCTET++))
@@ -254,8 +252,7 @@ add_client() {
     CLIENT_PUB_KEY=$(echo "${CLIENT_PRIV_KEY}" | wg pubkey)
     CLIENT_PSK=$(wg genpsk)
 
-    # Append peer to server config
-    cat <<EOF >> "${CONF_FILE}"
+    cat <<INNER_EOF >> "${CONF_FILE}"
 
 # BEGIN_PEER ${CLIENT_NAME}
 [Peer]
@@ -263,13 +260,11 @@ PublicKey = ${CLIENT_PUB_KEY}
 PresharedKey = ${CLIENT_PSK}
 AllowedIPs = 10.66.66.${CLIENT_OCTET}/32, fd42:42:42::${CLIENT_OCTET}/128
 # END_PEER ${CLIENT_NAME}
-EOF
+INNER_EOF
 
-    # Hot-reload WireGuard state without dropping active connections
     wg syncconf wg0 <(wg-quick strip wg0)
 
-    # Generate pure, standard client .conf (No extra client software needed)
-    cat <<EOF > "${CLIENT_CONF}"
+    cat <<INNER_EOF > "${CLIENT_CONF}"
 [Interface]
 PrivateKey = ${CLIENT_PRIV_KEY}
 Address = 10.66.66.${CLIENT_OCTET}/32, fd42:42:42::${CLIENT_OCTET}/128
@@ -283,7 +278,7 @@ PresharedKey = ${CLIENT_PSK}
 Endpoint = ${SERVER_IP}:${CHOSEN_PORT}
 AllowedIPs = 0.0.0.0/0, ::/0
 PersistentKeepalive = 21
-EOF
+INNER_EOF
 
     chmod 600 "${CLIENT_CONF}"
 
@@ -376,9 +371,6 @@ show_status() {
     sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc
 }
 
-# ==============================================================================
-# INTERACTIVE MENU
-# ==============================================================================
 check_root
 
 while true; do
@@ -406,3 +398,4 @@ while true; do
         *) echo -e "${RED}[!] Invalid option. Please choose 0-6.${NC}" ;;
     esac
 done
+EOF
