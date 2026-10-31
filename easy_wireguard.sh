@@ -1,7 +1,7 @@
-cat << 'EOF' > wg-stealth-deploy.sh
+cat << 'EOF' > easy_wireguard.sh && chmod +x easy_wireguard.sh && sudo ./easy_wireguard.sh
 #!/usr/bin/env bash
 # ==============================================================================
-# WIREGUARD STEALTH & SPEED SERVER DEPLOYMENT (STANDALONE EDITION)
+# EASY WIREGUARD: STEALTH & SPEED SERVER DEPLOYMENT (STANDALONE EDITION)
 # Server-Side DPI Evasion | BBR Speed Tuning | Location Override | Pure .conf
 # ==============================================================================
 
@@ -36,7 +36,6 @@ get_wan_iface() {
 
 get_public_ip() {
     local ip=""
-    # Hardened multi-fallback IP lookup without -f to prevent curl exit code 22
     for url in "https://api.ipify.org" "https://icanhazip.com" "https://ifconfig.me/ip" "https://checkip.amazonaws.com"; do
         ip=$(curl -s4 --max-time 4 "$url" 2>/dev/null | tr -d '[:space:]')
         if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -44,25 +43,34 @@ get_public_ip() {
             return 0
         fi
     done
-    # Fallback to interface IP if all external endpoints are blocked
     ip -4 addr show "$(get_wan_iface)" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1
 }
 
 install_base_packages() {
     echo -e "${CYAN}[*] Checking and installing core kernel & WireGuard dependencies...${NC}"
     export DEBIAN_FRONTEND=noninteractive
+    export NEEDRESTART_MODE=a
+    export NEEDRESTART_SUSPEND=1
     apt-get update -qq
-    apt-get install -y -qq wireguard wireguard-tools iptables iproute2 curl qrencode unbound > /dev/null
+    apt-get install -y -qq wireguard wireguard-tools iptables iproute2 curl qrencode unbound ca-certificates > /dev/null 2>&1
 }
 
 configure_local_dns_override() {
     echo -e "${CYAN}[*] Configuring internal Unbound DNS for strict Location Override...${NC}"
     mkdir -p /etc/unbound/unbound.conf.d
+    # Remove any broken default root-auto-trust-anchor conflicts if present
+    rm -f /etc/unbound/unbound.conf.d/root-auto-trust-anchor-file.conf 2>/dev/null || true
+
     cat <<INNER_EOF > /etc/unbound/unbound.conf.d/wg-stealth.conf
 server:
     num-threads: 2
     interface: 10.66.66.1
     interface: fd42:42:42::1
+    ip-freebind: yes
+    do-ip4: yes
+    do-ip6: yes
+    do-udp: yes
+    do-tcp: yes
     access-control: 10.66.66.0/24 allow
     access-control: fd42:42:42::/64 allow
     hide-identity: yes
@@ -75,6 +83,7 @@ server:
     minimal-responses: yes
     qname-minimisation: yes
     rrset-roundrobin: yes
+    tls-cert-bundle: /etc/ssl/certs/ca-certificates.crt
 forward-zone:
     name: "."
     forward-tls-upstream: yes
@@ -82,7 +91,7 @@ forward-zone:
     forward-addr: 9.9.9.9@853#dns.quad9.net
 INNER_EOF
     systemctl enable unbound > /dev/null 2>&1 || true
-    systemctl restart unbound || true
+    systemctl restart unbound > /dev/null 2>&1 || true
 }
 
 apply_speed_and_stealth_sysctl() {
@@ -116,7 +125,6 @@ INNER_EOF
 deploy_server() {
     install_base_packages
     apply_speed_and_stealth_sysctl
-    configure_local_dns_override
 
     mkdir -p "${CLIENTS_DIR}"
     chmod 700 "${WG_DIR}"
@@ -144,6 +152,12 @@ INNER_EOF
 
     echo -e "${CYAN}[*] Generating Server wg0.conf with embedded Stealth & Speed hooks...${NC}"
 
+    # Preserve existing [Peer] blocks if re-deploying
+    EXISTING_PEERS=""
+    if [[ -f "${CONF_FILE}" ]]; then
+        EXISTING_PEERS=$(sed -n '/# BEGIN_PEER/,$p' "${CONF_FILE}" || true)
+    fi
+
     cat <<INNER_EOF > "${CONF_FILE}"
 [Interface]
 Address = 10.66.66.1/24, fd42:42:42::1/64
@@ -155,9 +169,9 @@ MTU = 1380
 PostUp = iptables -t nat -A PREROUTING -i ${WAN_IFACE} -p udp -m multiport --dports ${PORT_CSV} -j REDIRECT --to-ports ${PRIMARY_PORT}
 PostUp = ip6tables -t nat -A PREROUTING -i ${WAN_IFACE} -p udp -m multiport --dports ${PORT_CSV} -j REDIRECT --to-ports ${PRIMARY_PORT}
 
-# 2. Strict Location Override & DNS Leak Interception
-PostUp = iptables -t nat -A PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 10.66.66.1:53
-PostUp = iptables -t nat -A PREROUTING -i wg0 -p tcp --dport 53 -j DNAT --to-destination 10.66.66.1:53
+# 2. Strict Location Override & Forwarding
+PostUp = iptables -A INPUT -i wg0 -p udp --dport 53 -j ACCEPT
+PostUp = iptables -A INPUT -i wg0 -p tcp --dport 53 -j ACCEPT
 PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o wg0 -j ACCEPT
 PostUp = iptables -t nat -A POSTROUTING -s 10.66.66.0/24 -o ${WAN_IFACE} -j MASQUERADE
 PostUp = ip6tables -A FORWARD -i wg0 -j ACCEPT; ip6tables -A FORWARD -o wg0 -j ACCEPT
@@ -177,8 +191,8 @@ PostUp = tc qdisc replace dev wg0 root fq maxrate 10gbit
 # --- POST-DOWN: Clean Teardown ---
 PostDown = iptables -t nat -D PREROUTING -i ${WAN_IFACE} -p udp -m multiport --dports ${PORT_CSV} -j REDIRECT --to-ports ${PRIMARY_PORT}
 PostDown = ip6tables -t nat -D PREROUTING -i ${WAN_IFACE} -p udp -m multiport --dports ${PORT_CSV} -j REDIRECT --to-ports ${PRIMARY_PORT}
-PostDown = iptables -t nat -D PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 10.66.66.1:53
-PostDown = iptables -t nat -D PREROUTING -i wg0 -p tcp --dport 53 -j DNAT --to-destination 10.66.66.1:53
+PostDown = iptables -D INPUT -i wg0 -p udp --dport 53 -j ACCEPT
+PostDown = iptables -D INPUT -i wg0 -p tcp --dport 53 -j ACCEPT
 PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o wg0 -j ACCEPT
 PostDown = iptables -t nat -D POSTROUTING -s 10.66.66.0/24 -o ${WAN_IFACE} -j MASQUERADE
 PostDown = ip6tables -D FORWARD -i wg0 -j ACCEPT; ip6tables -D FORWARD -o wg0 -j ACCEPT
@@ -189,9 +203,26 @@ PostDown = iptables -t mangle -D POSTROUTING -o ${WAN_IFACE} -j TTL --ttl-set 64
 PostDown = iptables -t mangle -D POSTROUTING -o ${WAN_IFACE} -p udp -j DSCP --set-dscp 0
 INNER_EOF
 
+    if [[ -n "${EXISTING_PEERS}" ]]; then
+        echo "" >> "${CONF_FILE}"
+        echo "${EXISTING_PEERS}" >> "${CONF_FILE}"
+    fi
+
     chmod 600 "${CONF_FILE}"
     systemctl enable wg-quick@wg0 > /dev/null 2>&1
     systemctl restart wg-quick@wg0
+
+    # Start Unbound AFTER wg0 (10.66.66.1) is online
+    configure_local_dns_override
+
+    if systemctl is-active --quiet unbound; then
+        DNS_SERVERS="10.66.66.1, 1.1.1.1"
+        echo -e "${GREEN}[+] Internal Unbound Stealth DNS is active on 10.66.66.1${NC}"
+    else
+        DNS_SERVERS="1.1.1.1, 9.9.9.9"
+        echo -e "${YELLOW}[i] Using tunnel-routed DNS (${DNS_SERVERS}) via WireGuard interface.${NC}"
+    fi
+    echo "DNS_SERVERS=\"${DNS_SERVERS}\"" >> "${STATE_FILE}"
 
     echo -e "${GREEN}[+] Server deployed and running on IP: ${SERVER_IP}${NC}"
     echo -e "${YELLOW}[i] Active Unique Stealth UDP Ports:${NC} ${STEALTH_PORTS[*]}"
@@ -215,6 +246,7 @@ add_client() {
     fi
 
     source "${STATE_FILE}"
+    DNS_SERVERS="${DNS_SERVERS:-10.66.66.1, 1.1.1.1}"
 
     echo ""
     read -rp "Enter a name for the new client (e.g., phone, laptop): " CLIENT_NAME
@@ -268,7 +300,7 @@ INNER_EOF
 [Interface]
 PrivateKey = ${CLIENT_PRIV_KEY}
 Address = 10.66.66.${CLIENT_OCTET}/32, fd42:42:42::${CLIENT_OCTET}/128
-DNS = 10.66.66.1, fd42:42:42::1
+DNS = ${DNS_SERVERS}
 MTU = 1380
 
 # Alternate Stealth Ports Available on Server: ${STEALTH_PORTS[*]}
