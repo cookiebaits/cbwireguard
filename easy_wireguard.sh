@@ -8,7 +8,6 @@ GREEN='\033[0;32m'
 PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 YELLOW='\033[1;33m'
-WHITE='\033[1;37m'
 RED='\033[0;31m'
 BOLD='\033[1m'
 NC='\033[0m'
@@ -51,44 +50,13 @@ if [[ -f "$SETTINGS_FILE" ]]; then
 fi
 
 # ------------------------------------------------------------------------------
-# Helper: Live Progress Bar & Strip 'clear' so everything stays in one window
+# Helper: Strip 'clear' from any sub-script so everything stays in one window
 # ------------------------------------------------------------------------------
-show_progress_bar() {
-    local percent="$1"
-    local step_text="$2"
-    local bar_width=28
-    local num_filled=$(( (percent * bar_width) / 100 ))
-    local num_empty=$(( bar_width - num_filled ))
-    local bar_str=""
-    local i
-
-    for ((i=0; i<num_filled; i++)); do bar_str+="█"; done
-    for ((i=0; i<num_empty; i++)); do bar_str+="░"; done
-
-    printf "\r  ${CYAN}[%3d%%]${NC} [${GREEN}%s${NC}] ${WHITE}%-54s${NC}\033[K" "$percent" "$bar_str" "$step_text"
-    if [[ "$percent" -ge 100 ]]; then
-        echo ""
-    fi
-}
-
 strip_clear_from_script() {
     local file="$1"
     if [[ -f "$file" ]]; then
         sed -i -E 's/^[[:space:]]*(clear|tput[[:space:]]+reset)[[:space:]]*$/: # clear disabled/g' "$file" 2>/dev/null || true
     fi
-}
-
-# Safe bounded iptables rule deletion (prevents infinite loops or xtables lock hangs)
-safe_ipt_del() {
-    local cmd="$1"
-    shift
-    local tries=0
-    while [[ $tries -lt 10 ]]; do
-        if ! "$cmd" -w 2 "$@" >/dev/null 2>&1; then
-            break
-        fi
-        tries=$((tries + 1))
-    done
 }
 
 # ------------------------------------------------------------------------------
@@ -110,28 +78,27 @@ isPortInUse() {
     local proto="${2:-udp}"
     if command -v ss &>/dev/null; then
         if [[ "$proto" == "udp" ]]; then
-            ss -uln 2>/dev/null | grep -qE "(:|\])${port}[[:space:]]" && return 0
+            ss -uln 2>/dev/null | grep -qE "(:|\])${port}\s" && return 0
         else
-            ss -tln 2>/dev/null | grep -qE "(:|\])${port}[[:space:]]" && return 0
+            ss -tln 2>/dev/null | grep -qE "(:|\])${port}\s" && return 0
         fi
     elif command -v netstat &>/dev/null; then
         if [[ "$proto" == "udp" ]]; then
-            netstat -uln 2>/dev/null | grep -qE "(:|\])${port}[[:space:]]" && return 0
+            netstat -uln 2>/dev/null | grep -qE "(:|\])${port}\s" && return 0
         else
-            netstat -tln 2>/dev/null | grep -qE "(:|\])${port}[[:space:]]" && return 0
+            netstat -tln 2>/dev/null | grep -qE "(:|\])${port}\s" && return 0
         fi
     fi
     return 1
 }
 
 # ------------------------------------------------------------------------------
-# 2. Fast, Non-Blocking Pre-Install Cleanup & Deep Uninstaller
+# 2. Pre-Install Cleanup & Deep Uninstaller (Sensitive Ports Protected)
 # ------------------------------------------------------------------------------
 cleanupOldWireguard() {
     local mode="${1:-preinstall}"
-    echo -e "\n${CYAN}${BOLD}[*] Cleaning up existing WireGuard instances, ports, and cached files...${NC}"
+    echo -e "\n${CYAN}[*] Scanning for WireGuard interfaces, services, and ports...${NC}"
 
-    show_progress_bar 15 "Scanning configs & kernel for WireGuard interfaces/ports..."
     local OLD_PORTS=()
     local OLD_IFACES=("wg0" "wg1")
 
@@ -143,7 +110,7 @@ cleanupOldWireguard() {
             OLD_IFACES+=("$iface_name")
 
             local extracted_ports
-            extracted_ports=$(grep -iE "^[[:space:]]*ListenPort[[:space:]]*=" "$conf" 2>/dev/null | awk -F'=' '{print $2}' | tr -d ' \t\r\n' || true)
+            extracted_ports=$(grep -iE "^\s*ListenPort\s*=" "$conf" 2>/dev/null | awk -F'=' '{print $2}' | tr -d ' \t\r\n' || true)
             for p in $extracted_ports; do
                 [[ "$p" =~ ^[0-9]+$ ]] && OLD_PORTS+=("$p")
             done
@@ -162,11 +129,11 @@ cleanupOldWireguard() {
 
     if command -v wg &>/dev/null; then
         local live_ifaces
-        live_ifaces=$(timeout 3 wg show interfaces 2>/dev/null || true)
+        live_ifaces=$(wg show interfaces 2>/dev/null || true)
         for liface in $live_ifaces; do
             OLD_IFACES+=("$liface")
             local lport
-            lport=$(timeout 2 wg show "$liface" listen-port 2>/dev/null | tr -d ' \t\r\n' || true)
+            lport=$(wg show "$liface" listen-port 2>/dev/null | tr -d ' \t\r\n' || true)
             [[ "$lport" =~ ^[0-9]+$ ]] && OLD_PORTS+=("$lport")
         done
     fi
@@ -177,18 +144,14 @@ cleanupOldWireguard() {
         OLD_IFACES+=("$kiface")
     done
 
-    # Fast depth-limited scan ONLY on *.conf files (prevents hanging on large directories in /root or /home)
-    local conf_files=()
-    while IFS= read -r -d '' cf; do
-        conf_files+=("$cf")
-    done < <(find /etc/wireguard "$INSTALL_DIR" /root /home -maxdepth 2 -type f -name "*.conf" -print0 2>/dev/null || true)
-
-    for cf in "${conf_files[@]}"; do
+    local search_dirs=("/etc/wireguard" "$INSTALL_DIR" "/root" "/home")
+    for sdir in "${search_dirs[@]}"; do
+        [[ ! -d "$sdir" ]] && continue
         while IFS= read -r ep_line; do
             local ep_port="${ep_line##*:}"
             ep_port=$(echo "$ep_port" | tr -d ' \t\r\n')
             [[ "$ep_port" =~ ^[0-9]+$ ]] && OLD_PORTS+=("$ep_port")
-        done < <(grep -E "^[[:space:]]*Endpoint[[:space:]]*=" "$cf" 2>/dev/null || true)
+        done < <(grep -rhE "^\s*Endpoint\s*=" "$sdir" 2>/dev/null || true)
     done
 
     local UNIQUE_IFACES=()
@@ -203,106 +166,92 @@ cleanupOldWireguard() {
         done < <(printf "%s\n" "${OLD_PORTS[@]}" | sort -u)
     fi
 
-    show_progress_bar 35 "Stopping WireGuard systemd services and active tunnels..."
-    timeout 10 systemctl stop "wg-quick@*" >/dev/null 2>&1 || true
-    timeout 10 systemctl disable "wg-quick@*" >/dev/null 2>&1 || true
+    echo -e "${CYAN}[*] Stopping all WireGuard systemd services and active tunnels...${NC}"
+    systemctl stop "wg-quick@*" >/dev/null 2>&1 || true
+    systemctl disable "wg-quick@*" >/dev/null 2>&1 || true
 
     local wg_units
-    wg_units=$(timeout 5 systemctl list-unit-files --no-legend 2>/dev/null | awk '{print $1}' | grep -iE '(^wg-quick|wireguard|cbwireguard)' || true)
+    wg_units=$(systemctl list-unit-files --no-legend 2>/dev/null | awk '{print $1}' | grep -iE '(^wg-quick|wireguard|cbwireguard)' || true)
     for unit in $wg_units; do
-        timeout 5 systemctl stop "$unit" >/dev/null 2>&1 || true
-        timeout 5 systemctl disable "$unit" >/dev/null 2>&1 || true
+        systemctl stop "$unit" >/dev/null 2>&1 || true
+        systemctl disable "$unit" >/dev/null 2>&1 || true
     done
 
-    show_progress_bar 55 "Removing virtual WireGuard interfaces (${UNIQUE_IFACES[*]})..."
     for iface in "${UNIQUE_IFACES[@]}"; do
-        timeout 5 systemctl stop "wg-quick@${iface}.service" >/dev/null 2>&1 || true
-        timeout 5 systemctl disable "wg-quick@${iface}.service" >/dev/null 2>&1 || true
+        systemctl stop "wg-quick@${iface}.service" >/dev/null 2>&1 || true
+        systemctl disable "wg-quick@${iface}.service" >/dev/null 2>&1 || true
         if command -v wg-quick &>/dev/null; then
-            timeout 5 wg-quick down "$iface" >/dev/null 2>&1 || true
+            wg-quick down "$iface" >/dev/null 2>&1 || true
         fi
         ip link set "$iface" down >/dev/null 2>&1 || true
         ip link delete dev "$iface" >/dev/null 2>&1 || true
 
-        safe_ipt_del iptables -D FORWARD -i "$iface" -j ACCEPT
-        safe_ipt_del iptables -D FORWARD -o "$iface" -j ACCEPT
-        safe_ipt_del iptables -D FORWARD -o "$iface" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-        safe_ipt_del iptables -D INPUT -i "$iface" -j ACCEPT
-        safe_ipt_del ip6tables -D FORWARD -i "$iface" -j ACCEPT
-        safe_ipt_del ip6tables -D FORWARD -o "$iface" -j ACCEPT
-        safe_ipt_del ip6tables -D FORWARD -i "$iface" -j REJECT
-        safe_ipt_del ip6tables -D OUTPUT -o "$iface" -j REJECT
+        while iptables -D FORWARD -i "$iface" -j ACCEPT 2>/dev/null; do :; done
+        while iptables -D FORWARD -o "$iface" -j ACCEPT 2>/dev/null; do :; done
+        while iptables -D FORWARD -o "$iface" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null; do :; done
+        while iptables -D INPUT -i "$iface" -j ACCEPT 2>/dev/null; do :; done
+        while ip6tables -D FORWARD -i "$iface" -j ACCEPT 2>/dev/null; do :; done
+        while ip6tables -D FORWARD -o "$iface" -j ACCEPT 2>/dev/null; do :; done
+        while ip6tables -D FORWARD -i "$iface" -j REJECT 2>/dev/null; do :; done
+        while ip6tables -D OUTPUT -o "$iface" -j REJECT 2>/dev/null; do :; done
     done
 
-    show_progress_bar 75 "Cleaning old WireGuard UDP ports (sensitive ports protected)..."
-    local cleaned_ports_list=()
     for port in "${UNIQUE_PORTS[@]}"; do
         if isSensitivePort "$port"; then
+            echo -e "${YELLOW}[!] Protected sensitive port ${port} skipped.${NC}"
             continue
         fi
-        cleaned_ports_list+=("${port}/udp")
-        safe_ipt_del iptables -D INPUT -p udp --dport "$port" -j ACCEPT
-        safe_ipt_del iptables -D INPUT -p tcp --dport "$port" -j ACCEPT
-        safe_ipt_del ip6tables -D INPUT -p udp --dport "$port" -j ACCEPT
-        safe_ipt_del ip6tables -D INPUT -p tcp --dport "$port" -j ACCEPT
+        echo -e "${CYAN} -> Removing firewall rules for WireGuard port ${port}/udp...${NC}"
+        while iptables -D INPUT -p udp --dport "$port" -j ACCEPT 2>/dev/null; do :; done
+        while iptables -D INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null; do :; done
+        while ip6tables -D INPUT -p udp --dport "$port" -j ACCEPT 2>/dev/null; do :; done
+        while ip6tables -D INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null; do :; done
 
-        if command -v ufw &>/dev/null && timeout 3 ufw status 2>/dev/null | grep -q "Status: active"; then
-            timeout 5 ufw delete allow "${port}/udp" >/dev/null 2>&1 || true
-            timeout 5 ufw delete allow "${port}/tcp" >/dev/null 2>&1 || true
+        if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+            ufw delete allow "${port}/udp" >/dev/null 2>&1 || true
+            ufw delete allow "${port}/tcp" >/dev/null 2>&1 || true
         fi
         if command -v firewall-cmd &>/dev/null && systemctl is-active --quiet firewalld 2>/dev/null; then
-            timeout 5 firewall-cmd --remove-port="${port}/udp" --permanent >/dev/null 2>&1 || true
-            timeout 5 firewall-cmd --remove-port="${port}/tcp" --permanent >/dev/null 2>&1 || true
-            timeout 5 firewall-cmd --reload >/dev/null 2>&1 || true
+            firewall-cmd --remove-port="${port}/udp" --permanent >/dev/null 2>&1 || true
+            firewall-cmd --remove-port="${port}/tcp" --permanent >/dev/null 2>&1 || true
+            firewall-cmd --reload >/dev/null 2>&1 || true
         fi
     done
 
-    show_progress_bar 88 "Flushing WireGuard NAT, TCPMSS mangle, and IPSet tables..."
     local wg_subnets=("10.18.0.0/24" "10.19.0.0/24" "10.8.0.0/24" "10.0.0.0/24" "10.66.66.0/24" "10.7.0.0/24" "10.10.0.0/24")
     local def_nic
     def_nic=$(ip -4 route show default 2>/dev/null | awk '/dev/ {for (i=1; i<=NF; i++) if ($i == "dev") print $(i+1)}' | head -n1 || echo "eth0")
 
     for sub in "${wg_subnets[@]}"; do
-        safe_ipt_del iptables -D FORWARD -s "$sub" -j ACCEPT
-        safe_ipt_del iptables -D FORWARD -d "$sub" -j ACCEPT
-        safe_ipt_del iptables -t nat -D POSTROUTING -s "$sub" -j MASQUERADE
-        safe_ipt_del iptables -t nat -D POSTROUTING -s "$sub" -o "$def_nic" -j MASQUERADE
-        safe_ipt_del iptables -t nat -D POSTROUTING -s "$sub" ! -o wg0 -j MASQUERADE
+        while iptables -D FORWARD -s "$sub" -j ACCEPT 2>/dev/null; do :; done
+        while iptables -D FORWARD -d "$sub" -j ACCEPT 2>/dev/null; do :; done
+        while iptables -t nat -D POSTROUTING -s "$sub" -j MASQUERADE 2>/dev/null; do :; done
+        while iptables -t nat -D POSTROUTING -s "$sub" -o "$def_nic" -j MASQUERADE 2>/dev/null; do :; done
+        while iptables -t nat -D POSTROUTING -s "$sub" ! -o wg0 -j MASQUERADE 2>/dev/null; do :; done
     done
 
-    safe_ipt_del iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-    safe_ipt_del iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-    safe_ipt_del iptables -t mangle -D POSTROUTING -o "$def_nic" -j TTL --ttl-set 64
-    safe_ipt_del iptables -t mangle -D POSTROUTING -j TTL --ttl-set 64
+    while iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null; do :; done
+    while iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null; do :; done
+    while iptables -t mangle -D POSTROUTING -o "$def_nic" -j TTL --ttl-set 64 2>/dev/null; do :; done
+    while iptables -t mangle -D POSTROUTING -j TTL --ttl-set 64 2>/dev/null; do :; done
 
     if command -v ipset &>/dev/null; then
         local wg_ipsets
         wg_ipsets=$(ipset list -n 2>/dev/null | grep -iE '^(wg_|geo_|vpn_)' || true)
         for setname in $wg_ipsets; do
-            safe_ipt_del iptables -D INPUT -m set --match-set "$setname" src -j DROP
-            safe_ipt_del iptables -D FORWARD -m set --match-set "$setname" src -j DROP
-            safe_ipt_del iptables -t nat -D POSTROUTING -m set --match-set "$setname" dst -o "$def_nic" -j MASQUERADE
+            while iptables -D INPUT -m set --match-set "$setname" src -j DROP 2>/dev/null; do :; done
+            while iptables -D FORWARD -m set --match-set "$setname" src -j DROP 2>/dev/null; do :; done
+            while iptables -t nat -D POSTROUTING -m set --match-set "$setname" dst -o "$def_nic" -j MASQUERADE 2>/dev/null; do :; done
             ipset flush "$setname" 2>/dev/null || true
             ipset destroy "$setname" 2>/dev/null || true
         done
     fi
 
-    show_progress_bar 96 "Purging old cached WireGuard scripts, temp files & sockets..."
-    rm -f "${INSTALL_DIR}"/*.sh "${INSTALL_DIR}"/.*.sh 2>/dev/null || true
-    rm -rf /run/wireguard /var/run/wireguard /tmp/*wireguard* /tmp/*wg* /var/tmp/*wireguard* /var/tmp/*wg* 2>/dev/null || true
-    rm -f /var/cache/apt/archives/*wireguard* /etc/wireguard/wg*.conf /etc/wireguard/params /etc/wireguard/manager.env /etc/wireguard/.*.swp 2>/dev/null || true
+    rm -f /etc/wireguard/wg*.conf /etc/wireguard/params /etc/wireguard/manager.env 2>/dev/null || true
     systemctl daemon-reload >/dev/null 2>&1 || true
 
-    show_progress_bar 100 "Cleanup & cache purge complete!"
-
     if [[ "$mode" == "preinstall" ]]; then
-        echo -e "  ${GREEN}├─ Interfaces Cleaned:${NC} ${UNIQUE_IFACES[*]}"
-        if [[ ${#cleaned_ports_list[@]} -gt 0 ]]; then
-            echo -e "  ${GREEN}├─ Old Ports Freed:${NC}    ${cleaned_ports_list[*]}"
-        else
-            echo -e "  ${GREEN}├─ Old Ports Freed:${NC}    None active"
-        fi
-        echo -e "  ${GREEN}└─ Cache & Security:${NC}   Cached WireGuard files purged; sensitive ports (80, 443, 22) untouched."
+        echo -e "${GREEN}[✔] Cleaned existing WireGuard instances and ports. Sensitive ports (80, 443, 22, etc.) untouched.${NC}"
     fi
 }
 
@@ -317,74 +266,67 @@ deep_remove_wireguard() {
         return 0
     fi
 
-    # 1. Non-blocking companion remove_server.sh execution:
-    #    Uses `yes "y"` + `timeout 15` so any internal `read` prompt never hangs at 10%!
-    show_progress_bar 10 "Running uninstaller script (auto-confirming prompts)..."
-    local rem_script=""
     if [[ -f "./remove_server.sh" ]]; then
-        rem_script="./remove_server.sh"
+        strip_clear_from_script "./remove_server.sh"
+        chmod +x "./remove_server.sh"
+        "./remove_server.sh" || true
     elif [[ -f "${INSTALL_DIR}/remove_server.sh" ]]; then
-        rem_script="${INSTALL_DIR}/remove_server.sh"
-    elif curl -sSfL --connect-timeout 4 --max-time 10 "${GIT_REPO}/remove_server.sh" -o "${INSTALL_DIR}/remove_server.sh" 2>/dev/null; then
-        rem_script="${INSTALL_DIR}/remove_server.sh"
+        strip_clear_from_script "${INSTALL_DIR}/remove_server.sh"
+        chmod 700 "${INSTALL_DIR}/remove_server.sh"
+        "${INSTALL_DIR}/remove_server.sh" || true
+    elif curl -sSfL "${GIT_REPO}/remove_server.sh" -o "${INSTALL_DIR}/remove_server.sh" 2>/dev/null; then
+        strip_clear_from_script "${INSTALL_DIR}/remove_server.sh"
+        chmod 700 "${INSTALL_DIR}/remove_server.sh"
+        "${INSTALL_DIR}/remove_server.sh" || true
     fi
 
-    if [[ -n "$rem_script" && -f "$rem_script" ]]; then
-        strip_clear_from_script "$rem_script"
-        chmod 700 "$rem_script" 2>/dev/null || true
-        yes "y" 2>/dev/null | timeout 15 "$rem_script" >/dev/null 2>&1 || true
-    fi
-
-    # 2. Run fast, non-blocking interface, service, port, and cache cleanup
     cleanupOldWireguard "deep"
 
-    show_progress_bar 50 "Unloading WireGuard kernel module..."
     if lsmod 2>/dev/null | grep -q "^wireguard"; then
-        timeout 5 modprobe -r wireguard 2>/dev/null || true
+        echo -e "${CYAN}[*] Unloading wireguard kernel module...${NC}"
+        modprobe -r wireguard 2>/dev/null || true
     fi
 
-    show_progress_bar 70 "Scanning /root, /home, /etc, and /tmp for WireGuard client configs..."
-    local removed_files_count=0
-    local client_search_dirs=("/root" "/home" "/tmp" "/var/tmp" "/etc/wireguard" "/opt")
+    echo -e "${CYAN}[*] Searching filesystem for leftover WireGuard client configs and keys...${NC}"
+    local client_search_dirs=("/root" "/home" "/tmp" "/etc/wireguard" "/opt")
     for sdir in "${client_search_dirs[@]}"; do
         [[ ! -d "$sdir" ]] && continue
         while IFS= read -r -d '' f; do
             local bname
             bname=$(basename "$f")
             [[ "$bname" == "resolv.conf" || "$bname" == "sysctl.conf" || "$bname" == "host.conf" || "$bname" == "nsswitch.conf" ]] && continue
-            if grep -qE "(\[Interface\]|\[Peer\]|PrivateKey[[:space:]]*=|AllowedIPs[[:space:]]*=|wg-quick)" "$f" 2>/dev/null || [[ "$bname" == *.conf.enc ]]; then
+            if grep -qE "(\[Interface\]|\[Peer\]|PrivateKey\s*=|AllowedIPs\s*=|wg-quick)" "$f" 2>/dev/null || [[ "$bname" == *.conf.enc ]]; then
+                echo -e "${CYAN} -> Removing WireGuard config file: ${f}${NC}"
                 rm -f "$f" 2>/dev/null || true
-                removed_files_count=$((removed_files_count + 1))
             fi
-        done < <(find "$sdir" -maxdepth 3 -type f \( -name "*.conf" -o -name "*.conf.enc" -o -name "*.key" \) -print0 2>/dev/null || true)
+        done < <(find "$sdir" -maxdepth 4 -type f \( -name "*.conf" -o -name "*.conf.enc" -o -name "*.key" \) -print0 2>/dev/null || true)
     done
 
-    show_progress_bar 85 "Removing WireGuard sysctl, dnsmasq, and systemd drop-in files..."
+    echo -e "${CYAN}[*] Deep scanning system directories for WireGuard drop-ins, services, and sysctl rules...${NC}"
     local sys_dirs=("/etc/sysctl.d" "/etc/dnsmasq.d" "/etc/systemd/system" "/etc/cron.d" "/etc/cron.daily" "/etc/cron.hourly")
     for sysd in "${sys_dirs[@]}"; do
         [[ ! -d "$sysd" ]] && continue
         while IFS= read -r -d '' sysf; do
             if echo "$sysf" | grep -qiE "(wireguard|wg0|wg1|wg-quick|wg_split|cbwireguard|stealth)" || grep -qiE "(wireguard|wg-quick|wg0|wg_split)" "$sysf" 2>/dev/null; then
+                echo -e "${CYAN} -> Removing system file: ${sysf}${NC}"
                 rm -f "$sysf" 2>/dev/null || true
-                removed_files_count=$((removed_files_count + 1))
             fi
-        done < <(find "$sysd" -maxdepth 2 \( -type f -o -type l \) -print0 2>/dev/null || true)
+        done < <(find "$sysd" -maxdepth 3 \( -type f -o -type l \) -print0 2>/dev/null || true)
     done
 
-    show_progress_bar 95 "Purging WireGuard directories, backups, and package caches..."
-    rm -rf /etc/wireguard /opt/cbwireguard "$INSTALL_DIR" /root/wireguard_backup* /home/*/easy_wireguard /var/cache/apt/archives/*wireguard* 2>/dev/null || true
+    echo -e "${CYAN}[*] Removing WireGuard directories and archives...${NC}"
+    rm -rf /etc/wireguard /opt/cbwireguard "$INSTALL_DIR" /root/wireguard_backup* /home/*/easy_wireguard 2>/dev/null || true
 
     systemctl daemon-reload >/dev/null 2>&1 || true
     systemctl reset-failed >/dev/null 2>&1 || true
     sysctl --system >/dev/null 2>&1 || true
     if command -v dnsmasq &>/dev/null && systemctl is-active --quiet dnsmasq 2>/dev/null; then
-        timeout 5 systemctl restart dnsmasq >/dev/null 2>&1 || true
+        systemctl restart dnsmasq >/dev/null 2>&1 || true
     fi
 
     init_environment
-    show_progress_bar 100 "Deep removal complete! (${removed_files_count} config/system files purged)"
 
-    echo -e "\n${GREEN}${BOLD}[✔] Deep removal finished! All WireGuard services, cached files, folders, and ports were removed.${NC}"
+    echo -e "\n${GREEN}${BOLD}[✔] Deep removal complete! All WireGuard services, configs, folders, and ports were cleaned.${NC}"
     echo -e "${GREEN}[✔] Sensitive ports (80, 443, 22, etc.) and host services remain completely untouched.${NC}"
 }
 
@@ -392,16 +334,16 @@ deep_remove_wireguard() {
 # 3. Max Speed (BBR + 64MB Buffers + Offload) & Security/Location Masking
 # ------------------------------------------------------------------------------
 apply_speed_and_stealth_optimizations() {
-    echo -e "\n${CYAN}${BOLD}[*] Applying Max Speed (BBR + 64MB Buffers) & Security/Location Masking...${NC}"
+    echo -e "\n${CYAN}[*] Applying Maximum Download/Upload Speed, Security & Location Masking Optimizations...${NC}"
 
-    show_progress_bar 20 "Loading BBR congestion control and packet mangle kernel modules..."
+    # 1. Load high-speed BBR and packet mangle kernel modules
     modprobe tcp_bbr >/dev/null 2>&1 || true
     modprobe iptable_nat >/dev/null 2>&1 || true
     modprobe iptable_mangle >/dev/null 2>&1 || true
     modprobe xt_mark >/dev/null 2>&1 || true
     modprobe ipt_TTL >/dev/null 2>&1 || true
 
-    show_progress_bar 45 "Applying 64MB UDP/TCP buffers, BBR & anti-spoofing sysctl rules..."
+    # 2. High-Throughput 64MB Buffers + BBR + Anti-Redirect Sysctl Profile
     local sysctl_file="/etc/sysctl.d/99-wireguard-speed-stealth.conf"
     cat << 'SYSCTL_EOF' > "$sysctl_file"
 # IP Forwarding & Asymmetric Split-Route Compatibility
@@ -456,7 +398,7 @@ SYSCTL_EOF
 
     sysctl --system -q >/dev/null 2>&1 || sysctl -p "$sysctl_file" >/dev/null 2>&1 || true
 
-    show_progress_bar 70 "Tuning txqueuelen (10000) and NIC GRO/GSO/TSO hardware offload..."
+    # 3. NIC & WireGuard Interface Queue + Hardware Offload Tuning
     local def_nic
     def_nic=$(ip -4 route show default 2>/dev/null | awk '/dev/ {for (i=1; i<=NF; i++) if ($i == "dev") print $(i+1)}' | head -n1 || echo "eth0")
 
@@ -467,16 +409,17 @@ SYSCTL_EOF
         ethtool -K "$def_nic" gro on gso on tso on >/dev/null 2>&1 || true
     fi
 
-    show_progress_bar 90 "Applying TCP MSS clamping, TTL=64 masking, and DNS ECS privacy..."
-    safe_ipt_del iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+    # 4. Live Firewall Optimizations: Bidirectional MSS Clamping + Outbound TTL=64 Normalization (Anti-p0f)
+    while iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null; do :; done
     iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
 
-    safe_ipt_del iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+    while iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null; do :; done
     iptables -t mangle -I POSTROUTING 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
 
-    safe_ipt_del iptables -t mangle -D POSTROUTING -o "$def_nic" -j TTL --ttl-set 64
+    while iptables -t mangle -D POSTROUTING -o "$def_nic" -j TTL --ttl-set 64 2>/dev/null; do :; done
     iptables -t mangle -A POSTROUTING -o "$def_nic" -j TTL --ttl-set 64 2>/dev/null || true
 
+    # 5. DNS Location Masking (Strip EDNS0 Client-Subnet if dnsmasq is active)
     if command -v dnsmasq &>/dev/null && [[ -d /etc/dnsmasq.d ]]; then
         cat << 'DNS_PRIV_EOF' > /etc/dnsmasq.d/00-wg-location-stealth.conf
 # Strip EDNS0 Client Subnet (ECS) so upstream DNS servers never see VPS/Client subnet location
@@ -485,11 +428,11 @@ bogus-priv
 filterwin2k
 DNS_PRIV_EOF
         if systemctl is-active --quiet dnsmasq 2>/dev/null; then
-            timeout 5 systemctl reload dnsmasq >/dev/null 2>&1 || timeout 5 systemctl restart dnsmasq >/dev/null 2>&1 || true
+            systemctl reload dnsmasq >/dev/null 2>&1 || systemctl restart dnsmasq >/dev/null 2>&1 || true
         fi
     fi
 
-    show_progress_bar 100 "Speed, Security & Location Masking Optimizations Active!"
+    echo -e "${GREEN}[✔] Speed & Stealth Active: BBR Congestion Control, 64MB Buffers, MSS Clamping, TTL=64 Masking & ECS Privacy.${NC}"
 }
 
 # ------------------------------------------------------------------------------
@@ -511,7 +454,7 @@ display_post_install_configs() {
             if grep -q "\[Interface\]" "$cfg" 2>/dev/null && grep -q "Endpoint" "$cfg" 2>/dev/null; then
                 found_configs+=("$cfg")
             fi
-        done < <(find "$spath" -maxdepth 2 -type f -name "*.conf" -print0 2>/dev/null || true)
+        done < <(find "$spath" -maxdepth 3 -type f -name "*.conf" -print0 2>/dev/null || true)
     done
 
     local unique_configs=()
@@ -525,6 +468,7 @@ display_post_install_configs() {
         fi
     done
 
+    # If setup_server.sh did not generate a client config automatically, run add_client.sh now
     if [[ ${#unique_configs[@]} -eq 0 ]]; then
         echo -e "\n${CYAN}[*] Generating initial client configuration...${NC}"
         fetch_and_run "add_client.sh"
@@ -540,7 +484,7 @@ display_post_install_configs() {
                         unique_configs+=("$cfg")
                     fi
                 fi
-            done < <(find "$spath" -maxdepth 2 -type f -name "*.conf" -print0 2>/dev/null || true)
+            done < <(find "$spath" -maxdepth 3 -type f -name "*.conf" -print0 2>/dev/null || true)
         done
     fi
 
@@ -565,28 +509,21 @@ display_post_install_configs() {
 }
 
 # ------------------------------------------------------------------------------
-# 5. Pre-fetch Fresh Companion Scripts (With Progress Bar & Timeouts)
+# 5. Pre-fetch Required Companion Scripts
 # ------------------------------------------------------------------------------
 prefetch_companion_scripts() {
     local scripts=("setup_server.sh" "add_client.sh" "user_manager.sh" "backup_manager.sh" "domain_bypass.sh" "geo_vpn_filter.sh" "remove_server.sh")
-    local total=${#scripts[@]}
-    local count=0
-
-    echo -e "\n${CYAN}${BOLD}[*] Fetching fresh companion scripts into ${INSTALL_DIR}...${NC}"
+    echo -e "\n${CYAN}[*] Syncing companion scripts into ${INSTALL_DIR}...${NC}"
     mkdir -p "$INSTALL_DIR"
     chmod 700 "$INSTALL_DIR"
 
     for s in "${scripts[@]}"; do
-        count=$((count + 1))
-        local pct=$(( (count * 100) / total ))
-        show_progress_bar "$pct" "Syncing ${s} (${count}/${total})..."
-
         if [[ -f "./${s}" ]]; then
             cp -f "./${s}" "${INSTALL_DIR}/${s}"
             strip_clear_from_script "${INSTALL_DIR}/${s}"
             chmod 700 "${INSTALL_DIR}/${s}"
-        else
-            if curl -sSfL --connect-timeout 5 --max-time 15 "${GIT_REPO}/${s}" -o "${INSTALL_DIR}/${s}" 2>/dev/null; then
+        elif [[ ! -f "${INSTALL_DIR}/${s}" ]]; then
+            if curl -sSfL "${GIT_REPO}/${s}" -o "${INSTALL_DIR}/${s}" 2>/dev/null; then
                 strip_clear_from_script "${INSTALL_DIR}/${s}"
                 chmod 700 "${INSTALL_DIR}/${s}"
             else
@@ -598,21 +535,26 @@ EOF
                     chmod 700 "${INSTALL_DIR}/geo_vpn_filter.sh"
                 fi
             fi
+        else
+            strip_clear_from_script "${INSTALL_DIR}/${s}"
+            chmod 700 "${INSTALL_DIR}/${s}"
         fi
     done
 }
 
 # ------------------------------------------------------------------------------
-# 6. Patch & Run Setup Server (Python 3.12 Safe Parser + Single Port Selection)
+# 6. Patch & Run Setup Server (Fixes input_VPN_PORT Unbound Variable + Port Prompt)
 # ------------------------------------------------------------------------------
 run_setup_server() {
     cleanupOldWireguard "preinstall"
     prefetch_companion_scripts
 
     local target_script="${INSTALL_DIR}/setup_server.sh"
-    if [[ ! -f "$target_script" ]]; then
+    if [[ -f "./setup_server.sh" ]]; then
+        cp -f "./setup_server.sh" "$target_script"
+    else
         echo -e "\n${GREEN}Fetching latest version of setup_server.sh...${NC}"
-        if ! curl -sSfL --connect-timeout 5 --max-time 15 "${GIT_REPO}/setup_server.sh" -o "$target_script"; then
+        if ! curl -sSfL "${GIT_REPO}/setup_server.sh" -o "$target_script"; then
             echo -e "${RED}Error: Failed to pull setup_server.sh from ${GIT_REPO}.${NC}"
             return 1
         fi
@@ -639,9 +581,9 @@ select_safe_wg_port() {
     is_used() {
         local p="$1"
         if command -v ss &>/dev/null; then
-            ss -uln 2>/dev/null | grep -qE "(:|\])${p}[[:space:]]" && return 0
+            ss -uln 2>/dev/null | grep -qE "(:|\])${p}\s" && return 0
         elif command -v netstat &>/dev/null; then
-            netstat -uln 2>/dev/null | grep -qE "(:|\])${p}[[:space:]]" && return 0
+            netstat -uln 2>/dev/null | grep -qE "(:|\])${p}\s" && return 0
         fi
         return 1
     }
@@ -726,83 +668,65 @@ import sys, re
 script_path = sys.argv[1]
 selector_path = sys.argv[2]
 
-with open(script_path, 'r', encoding='utf-8', errors='replace') as f:
+with open(script_path, 'r') as f:
     content = f.read()
 
-with open(selector_path, 'r', encoding='utf-8', errors='replace') as f:
+with open(selector_path, 'r') as f:
     selector_code = f.read()
 
-content = re.sub(
-    r'(?m)^[ \t]*(clear|tput[ \t]+reset)[ \t]*$',
-    lambda _: ': # clear disabled',
-    content
-)
+# 1. Strip any standalone 'clear' commands
+content = re.sub(r'(?m)^[ \t]*(clear|tput[ \t]+reset)[ \t]*$', ': # clear disabled', content)
 
+# 2. Guard geo_vpn_filter.sh in PostUp so wg-quick never fails with exit status 127
 content = re.sub(
     r'PostUp\s*=\s*(/root/easy_wireguard/geo_vpn_filter\.sh\s+--apply)(?!\s*\|\|)',
-    lambda m: f'PostUp = test -x /root/easy_wireguard/geo_vpn_filter.sh && {m.group(1)} || true',
+    r'PostUp = test -x /root/easy_wireguard/geo_vpn_filter.sh && \1 || true',
     content
 )
 
-if 'select_safe_wg_port()' not in content:
+# 3. Inject selector function & default variables right after shebang / set -euo pipefail
+if 'select_safe_wg_port' not in content:
+    if re.search(r'(?m)^set\s+-euo\s+pipefail', content):
+        content = re.sub(r'(?m)^(set\s+-euo\s+pipefail[^\n]*\n)', r'\1\n' + selector_code + '\n', content, count=1)
+    else:
+        content = re.sub(r'^(#!/bin/bash[^\n]*\n)', r'\1\n' + selector_code + '\n', content, count=1)
+
+    # 4. Replace the native port menu + read input_VPN_PORT + case "$input_VPN_PORT" ... esac block in-place
+    #    so port selection happens ONCE (right after dependency installation) and never leaves input_VPN_PORT unbound.
+    replaced = False
+
+    # Pattern A: Full port block from the menu echo before [1] through read input_VPN_PORT and its case...esac
+    pattern_full = re.compile(
+        r'(?:^[ \t]*echo[^\n]*(?:port|Port|\[1\])[^\n]*\n(?:^[ \t]*echo[^\n]*\n)*)?'
+        r'^[ \t]*(?:echo[^\n]*Select option \[1-9\][^\n]*\n)?'
+        r'^[ \t]*read\b[^\n]*\b(?:input_VPN_PORT|VPN_PORT|PORT|SERVER_PORT)\b[^\n]*\n'
+        r'(?:^[ \t]*case\s+"?\$(?:input_VPN_PORT|VPN_PORT|PORT)"?\s+in[\s\S]*?^[ \t]*esac[ \t]*\n)?',
+        re.MULTILINE
+    )
+    if pattern_full.search(content):
+        content = pattern_full.sub('\nselect_safe_wg_port\n', content, count=1)
+        replaced = True
+
+    # Remove any leftover old menu echo lines directly above select_safe_wg_port (e.g. [1] .. [9] port options)
     lines = content.splitlines()
-    out_lines = []
-    injected_header = False
-    replaced_port_prompt = False
-    in_port_case = False
-
-    read_port_idx = -1
+    cleaned_lines = []
     for idx, line in enumerate(lines):
-        if re.search(r'^\s*read\b.*\b(input_VPN_PORT|VPN_PORT|PORT|SERVER_PORT)\b', line):
-            read_port_idx = idx
-            break
-
-    for idx, line in enumerate(lines):
-        if not injected_header:
-            out_lines.append(line)
-            if re.match(r'^\s*set\s+-euo\s+pipefail', line) or (idx == 0 and line.startswith('#!') and 'set -euo pipefail' not in content):
-                out_lines.append('')
-                out_lines.extend(selector_code.splitlines())
-                out_lines.append('')
-                injected_header = True
-            continue
-
-        if read_port_idx != -1 and (read_port_idx - 18) <= idx < read_port_idx:
-            if re.search(r'(^\s*echo\b.*(\[[1-9]\]|port|Port|Select option)|^\s*printf\b.*port)', line):
-                out_lines.append('# ' + line + ' # replaced by select_safe_wg_port')
+        if re.search(r'echo.*(\[[1-9]\]|Select option \[1-9\]|enter custom port|Choose a WireGuard port|Select WireGuard port)', line, re.IGNORECASE):
+            # Check if select_safe_wg_port is within the next 15 lines
+            lookahead = '\n'.join(lines[idx:min(len(lines), idx+16)])
+            if 'select_safe_wg_port' in lookahead:
                 continue
+        cleaned_lines.append(line)
+    content = '\n'.join(cleaned_lines) + '\n'
 
-        if idx == read_port_idx:
-            out_lines.append('select_safe_wg_port')
-            replaced_port_prompt = True
-            continue
-
-        if replaced_port_prompt and not in_port_case and read_port_idx < idx <= read_port_idx + 6:
-            if re.search(r'^\s*case\s+["\']?\$\{?(input_VPN_PORT|VPN_PORT|PORT)\}?["\']?\s+in', line):
-                in_port_case = True
-                out_lines.append('# ' + line)
-                continue
-
-        if in_port_case:
-            out_lines.append('# ' + line)
-            if re.match(r'^\s*esac\b', line):
-                in_port_case = False
-                out_lines.append('VPN_PORT="$SELECTED_WG_PORT"')
-                out_lines.append('input_VPN_PORT="$SELECTED_WG_PORT"')
-            continue
-
-        out_lines.append(line)
-
-    final_text = '\n'.join(out_lines) + '\n'
-    if not replaced_port_prompt:
-        dep_match = re.search(r'(Installing WireGuard and required dependencies[\s\S]*?(?:apt-get|apt|yum|dnf|pacman|apk)\s+install[^\n]+\n(?:\s*fi\n)?)', final_text)
+    # Fallback if no read input_VPN_PORT was matched
+    if not replaced:
+        dep_match = re.search(r'(Installing WireGuard and required dependencies[\s\S]*?(?:apt-get|apt|yum|dnf|pacman|apk)\s+install[^\n]+\n(?:\s*fi\n)?)', content)
         if dep_match:
-            pos = dep_match.end()
-            final_text = final_text[:pos] + '\nselect_safe_wg_port\n' + final_text[pos:]
+            insert_pos = dep_match.end()
+            content = content[:insert_pos] + '\nselect_safe_wg_port\n' + content[insert_pos:]
 
-    content = final_text
-
-with open(script_path, 'w', encoding='utf-8') as f:
+with open(script_path, 'w') as f:
     f.write(content)
 PY_EOF
     fi
@@ -810,17 +734,20 @@ PY_EOF
     rm -f "$port_selector_file"
     "$target_script"
 
+    # Apply max speed (BBR, 64MB buffers, GRO/GSO) & location/security masking (TTL=64, MSS clamping, ECS privacy)
     apply_speed_and_stealth_optimizations
+
+    # Output the generated client configuration and QR code for immediate copy/paste
     display_post_install_configs
 }
 
 # ------------------------------------------------------------------------------
-# 7. Verified Domain-Based Split Tunneling Engine (With Live Progress Bar)
+# 7. Verified Domain-Based Split Tunneling Engine (Client AllowedIPs + Server IPSet)
 # ------------------------------------------------------------------------------
 recalculate_and_apply_split_tunnel() {
-    echo -e "\n${CYAN}${BOLD}[*] Updating Domain-Based Split Tunneling Routes...${NC}"
+    echo -e "\n${CYAN}[*] Resolving split-tunnel domains and computing CIDR routes...${NC}"
 
-    show_progress_bar 15 "Checking DNS & IPSet routing utilities..."
+    # Ensure required DNS & IPSet tools are installed
     for tool_pkg in "dig:dnsutils" "ipset:ipset" "python3:python3" "qrencode:qrencode"; do
         local bin="${tool_pkg%%:*}"
         local pkg="${tool_pkg##*:}"
@@ -833,8 +760,8 @@ recalculate_and_apply_split_tunnel() {
     local mode
     mode=$(cat "$SPLIT_MODE_FILE" 2>/dev/null || echo "BYPASS")
 
-    show_progress_bar 45 "Resolving domain A records across multiple DNS resolvers..."
-
+    # Use Python 3 to resolve domains (filtering out CNAME text), aggregate /24 subnets,
+    # compute exact AllowedIPs exclusions, update settings.conf, and update all client .conf files
     python3 - "$BYPASS_DOMAINS_FILE" "$SETTINGS_FILE" "$mode" "$INSTALL_DIR" << 'PY_SPLIT_EOF'
 import sys, os, re, socket, subprocess, ipaddress
 
@@ -843,9 +770,10 @@ settings_file = sys.argv[2]
 mode = sys.argv[3].strip().upper()
 install_dir = sys.argv[4]
 
+# 1. Read configured domains
 raw_domains = []
 if os.path.isfile(domains_file):
-    with open(domains_file, 'r', encoding='utf-8', errors='replace') as f:
+    with open(domains_file, 'r') as f:
         for line in f:
             d = line.strip().lower()
             if d and not d.startswith('#'):
@@ -853,9 +781,10 @@ if os.path.isfile(domains_file):
                 if d and d not in raw_domains:
                     raw_domains.append(d)
 
+# Read current settings.conf to get DNS and Server Public IP (so we never exclude DNS or Server IP)
 dns_ips = set()
 if os.path.isfile(settings_file):
-    with open(settings_file, 'r', encoding='utf-8', errors='replace') as f:
+    with open(settings_file, 'r') as f:
         for line in f:
             if line.startswith('DEFAULT_DNS='):
                 val = line.split('=', 1)[1].strip().strip('"\'')
@@ -868,6 +797,7 @@ if os.path.isfile(settings_file):
                     except ValueError:
                         pass
 
+# Expand domains with common subdomains for complete CDN coverage
 expanded_domains = set()
 for d in raw_domains:
     expanded_domains.add(d)
@@ -884,6 +814,7 @@ for d in raw_domains:
     elif 'linkedin.com' in d:
         expanded_domains.update(['www.linkedin.com', 'licdn.com', 'media.licdn.com', 'static.licdn.com'])
 
+# 2. Resolve IPv4 addresses across system resolver + 1.1.1.1 + 8.8.8.8 (strictly filtering out CNAME strings)
 resolved_v4 = set()
 for dom in sorted(expanded_domains):
     try:
@@ -898,8 +829,7 @@ for dom in sorted(expanded_domains):
             out = subprocess.check_output(
                 ['dig', '+time=2', '+tries=1', '+short', f'@{resolver}', dom, 'A'],
                 stderr=subprocess.DEVNULL,
-                text=True,
-                timeout=3
+                text=True
             )
             for token in out.splitlines():
                 token = token.strip()
@@ -910,21 +840,25 @@ for dom in sorted(expanded_domains):
         except Exception:
             pass
 
+# Populate server-side ipset wg_split_v4 for live server tracking
 try:
-    subprocess.run(['ipset', 'create', 'wg_split_v4', 'hash:net', 'family', 'inet'], stderr=subprocess.DEVNULL, timeout=3)
-    subprocess.run(['ipset', 'flush', 'wg_split_v4'], stderr=subprocess.DEVNULL, timeout=3)
+    subprocess.run(['ipset', 'create', 'wg_split_v4', 'hash:net', 'family', 'inet'], stderr=subprocess.DEVNULL)
+    subprocess.run(['ipset', 'flush', 'wg_split_v4'], stderr=subprocess.DEVNULL)
     for ip_obj in resolved_v4:
-        subprocess.run(['ipset', 'add', 'wg_split_v4', f'{ip_obj}/24'], stderr=subprocess.DEVNULL, timeout=2)
+        subprocess.run(['ipset', 'add', 'wg_split_v4', f'{ip_obj}/24'], stderr=subprocess.DEVNULL)
 except Exception:
     pass
 
+# 3. Compute AllowedIPs CIDR string
 if not raw_domains or not resolved_v4:
     final_allowed_ips = "0.0.0.0/1, 128.0.0.0/1"
     subnet_count = 0
 else:
+    # Aggregate resolved IPs into /24 subnets so rotating CDN nodes in the same /24 are covered
     raw_nets = []
     for ip_obj in resolved_v4:
         net24 = ipaddress.IPv4Network(f"{ip_obj}/24", strict=False)
+        # Do not exclude a /24 if it contains one of the configured WireGuard DNS resolvers; exclude /32 instead
         if any(d_ip in net24 for d_ip in dns_ips):
             if ip_obj not in dns_ips:
                 raw_nets.append(ipaddress.IPv4Network(f"{ip_obj}/32", strict=False))
@@ -935,10 +869,12 @@ else:
     subnet_count = len(target_nets)
 
     if mode == "ONLY_VPN":
+        # Route ONLY these domain subnets (plus DNS servers) through the VPN
         include_nets = list(target_nets) + [ipaddress.IPv4Network(f"{d_ip}/32") for d_ip in dns_ips]
         collapsed_inc = list(ipaddress.collapse_addresses(include_nets))
         final_allowed_ips = ", ".join(str(n) for n in collapsed_inc)
     else:
+        # BYPASS mode: Subtract target_nets from 0.0.0.0/1 and 128.0.0.0/1
         allowed_pool = [ipaddress.IPv4Network("0.0.0.0/1"), ipaddress.IPv4Network("128.0.0.0/1")]
         for excl in target_nets:
             next_pool = []
@@ -946,16 +882,20 @@ else:
                 if net.overlaps(excl):
                     if excl.subnet_of(net):
                         next_pool.extend(net.address_exclude(excl))
+                    else:
+                        # excl is larger than or equal to net
+                        pass
                 else:
                     next_pool.append(net)
             allowed_pool = next_pool
         collapsed_pool = list(ipaddress.collapse_addresses(allowed_pool))
         final_allowed_ips = ", ".join(str(n) for n in collapsed_pool)
 
+# 4. Update DEFAULT_ALLOWED_IPS in settings.conf safely
 settings_lines = []
 found_key = False
 if os.path.isfile(settings_file):
-    with open(settings_file, 'r', encoding='utf-8', errors='replace') as f:
+    with open(settings_file, 'r') as f:
         for line in f:
             if line.startswith('DEFAULT_ALLOWED_IPS='):
                 settings_lines.append(f'DEFAULT_ALLOWED_IPS="{final_allowed_ips}"\n')
@@ -965,9 +905,10 @@ if os.path.isfile(settings_file):
 if not found_key:
     settings_lines.append(f'DEFAULT_ALLOWED_IPS="{final_allowed_ips}"\n')
 
-with open(settings_file, 'w', encoding='utf-8') as f:
+with open(settings_file, 'w') as f:
     f.writelines(settings_lines)
 
+# 5. Update AllowedIPs in all existing client .conf files
 search_dirs = ['/etc/wireguard/clients', install_dir, '/root', '/etc/wireguard']
 updated_files = []
 seen_realpaths = set()
@@ -975,42 +916,39 @@ seen_realpaths = set()
 for sdir in search_dirs:
     if not os.path.isdir(sdir):
         continue
-    for fname in os.listdir(sdir):
-        if not fname.endswith('.conf') or fname in ('wg0.conf', 'wg1.conf', 'settings.conf', 'resolv.conf', 'sysctl.conf'):
-            continue
-        fpath = os.path.join(sdir, fname)
-        if not os.path.isfile(fpath):
-            continue
-        rpath = os.path.realpath(fpath)
-        if rpath in seen_realpaths:
-            continue
-        try:
-            with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
-                c_text = f.read()
-            if '[Interface]' in c_text and '[Peer]' in c_text and 'Endpoint' in c_text:
-                new_text = re.sub(
-                    r'(?m)^(\s*AllowedIPs\s*=\s*).*$',
-                    lambda m: m.group(1) + final_allowed_ips,
-                    c_text
-                )
-                with open(fpath, 'w', encoding='utf-8') as f:
-                    f.write(new_text)
-                seen_realpaths.add(rpath)
-                updated_files.append(fpath)
-        except Exception:
-            pass
+    for root, _, files in os.walk(sdir):
+        for fname in files:
+            if not fname.endswith('.conf') or fname in ('wg0.conf', 'wg1.conf', 'settings.conf', 'resolv.conf', 'sysctl.conf'):
+                continue
+            fpath = os.path.join(root, fname)
+            rpath = os.path.realpath(fpath)
+            if rpath in seen_realpaths:
+                continue
+            try:
+                with open(fpath, 'r') as f:
+                    c_text = f.read()
+                if '[Interface]' in c_text and '[Peer]' in c_text and 'Endpoint' in c_text:
+                    new_text = re.sub(
+                        r'(?m)^(\s*AllowedIPs\s*=\s*).*$',
+                        r'\g<1>' + final_allowed_ips,
+                        c_text
+                    )
+                    with open(fpath, 'w') as f:
+                        f.write(new_text)
+                    seen_realpaths.add(rpath)
+                    updated_files.append(fpath)
+            except Exception:
+                pass
 
-with open('/tmp/.wg_split_summary', 'w', encoding='utf-8') as sf:
-    sf.write(f"  \033[0;32m├─ Split Mode:\033[0m        {mode} ({len(raw_domains)} base domain(s) -> {subnet_count} CIDR block(s))\n")
-    sf.write(f"  \033[0;32m└─ Client Configs:\033[0m    Updated {len(updated_files)} client .conf file(s) & {settings_file}\n")
+print(f"\033[0;32m[✔] Split Tunneling ({mode} Mode): Resolved {len(raw_domains)} base domain(s) into {subnet_count} subnet block(s).\033[0m")
+print(f"\033[0;32m[✔] Updated DEFAULT_ALLOWED_IPS in {settings_file}\033[0m")
+if updated_files:
+    print(f"\033[0;32m[✔] Automatically updated AllowedIPs in {len(updated_files)} existing client .conf file(s):\033[0m")
+    for uf in updated_files:
+        print(f"    - {uf}")
 PY_SPLIT_EOF
 
-    show_progress_bar 100 "Split-tunnel CIDR calculation & client config update complete!"
-    if [[ -f /tmp/.wg_split_summary ]]; then
-        cat /tmp/.wg_split_summary
-        rm -f /tmp/.wg_split_summary
-    fi
-
+    # Reload settings.conf into current shell
     if [[ -f "$SETTINGS_FILE" ]]; then
         # shellcheck source=/dev/null
         source "$SETTINGS_FILE"
@@ -1025,7 +963,8 @@ domain_split_tunnel_menu() {
         local mode
         mode=$(cat "$SPLIT_MODE_FILE" 2>/dev/null || echo "BYPASS")
         local dom_count
-        dom_count=$(awk '!/^(#|[[:space:]]*$)/ {c++} END {print c+0}' "$BYPASS_DOMAINS_FILE" 2>/dev/null || echo 0)
+        dom_count=$(grep -c -v -E '^(#|$)' "$BYPASS_DOMAINS_FILE" 2>/dev/null || true)
+        dom_count=${dom_count:-0}
 
         echo -e "\n${PURPLE}┌──────────────────────────────────────────────────────────────┐${NC}"
         echo -e "${PURPLE}│             ${GREEN}${BOLD}🌐 Domain-Based Split Tunneling Manager${NC}          ${PURPLE}│${NC}"
@@ -1076,12 +1015,12 @@ domain_split_tunnel_menu() {
                     echo -e "${YELLOW}No domains currently configured.${NC}"
                 else
                     echo -e "\n${CYAN}Configured Domains:${NC}"
-                    awk '!/^(#|[[:space:]]*$)/ {printf "  %2d) %s\n", ++i, $0}' "$BYPASS_DOMAINS_FILE"
+                    grep -v -E '^(#|$)' "$BYPASS_DOMAINS_FILE" | nl -w2 -s') '
                     echo -en "${GREEN}Enter number to remove [1-${dom_count}]: ${NC}"
                     read -r DEL_IDX
                     if [[ "$DEL_IDX" =~ ^[0-9]+$ ]] && [[ "$DEL_IDX" -ge 1 && "$DEL_IDX" -le "$dom_count" ]]; then
                         local target_d
-                        target_d=$(awk '!/^(#|[[:space:]]*$)/ {if (++i == idx) print $0}' idx="$DEL_IDX" "$BYPASS_DOMAINS_FILE")
+                        target_d=$(grep -v -E '^(#|$)' "$BYPASS_DOMAINS_FILE" | sed -n "${DEL_IDX}p")
                         grep -v -F -x "$target_d" "$BYPASS_DOMAINS_FILE" > "${BYPASS_DOMAINS_FILE}.tmp" || true
                         mv "${BYPASS_DOMAINS_FILE}.tmp" "$BYPASS_DOMAINS_FILE"
                         echo -e "${GREEN}[✔] Removed '${target_d}'.${NC}"
@@ -1134,7 +1073,7 @@ domain_split_tunnel_menu() {
                 if [[ "$dom_count" -eq 0 ]]; then
                     echo -e "${YELLOW}No domains configured (Full Tunnel: 0.0.0.0/1, 128.0.0.0/1).${NC}"
                 else
-                    awk '!/^(#|[[:space:]]*$)/ {printf "  %2d) %s\n", ++i, $0}' "$BYPASS_DOMAINS_FILE"
+                    grep -v -E '^(#|$)' "$BYPASS_DOMAINS_FILE" | nl -w2 -s') '
                 fi
                 display_post_install_configs
                 ;;
@@ -1172,7 +1111,7 @@ fetch_and_run() {
         script_path="${INSTALL_DIR}/${script_name}"
         echo -e "\n${GREEN}Fetching latest version of ${script_name}...${NC}"
 
-        if curl -sSfL --connect-timeout 5 --max-time 15 "${GIT_REPO}/${script_name}" -o "$script_path"; then
+        if curl -sSfL "${GIT_REPO}/${script_name}" -o "$script_path"; then
             strip_clear_from_script "$script_path"
             chmod 700 "$script_path"
             "$script_path"
