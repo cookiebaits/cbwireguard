@@ -1,511 +1,385 @@
-cat << 'EOF' > easy_wireguard.sh && chmod +x easy_wireguard.sh && sudo ./easy_wireguard.sh
-#!/usr/bin/env bash
+#!/bin/bash
 # ==============================================================================
-# EASY WIREGUARD: MAXIMUM SPEED & STEALTH DEPLOYMENT (STANDALONE)
-# Full Wipe | BBR + FQ Tuning | Zero Bottlenecks | Multi-Port Hopping
+# 🍪 Cookie's Easy WireGuard Manager (Enhanced Installer & Safe Port Management)
 # ==============================================================================
+set -euo pipefail
 
-set -e
-
-RED='\033[0;31m'
 GREEN='\033[0;32m'
+PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-WG_DIR="/etc/wireguard"
-CLIENTS_DIR="${WG_DIR}/clients"
-CONF_FILE="${WG_DIR}/wg0.conf"
-STATE_FILE="${WG_DIR}/stealth_state.env"
+GIT_REPO='https://raw.githubusercontent.com/cookiebaits/cbwireguard/main'
+INSTALL_DIR="/root/easy_wireguard" 
+SETTINGS_FILE="${INSTALL_DIR}/settings.conf"
+WG_PARAMS_FILE="/etc/wireguard/params"
 
-# Recommended primary stealth port (NVIDIA GameStream / Low-Latency UDP)
-PRIMARY_PORT=47984
+# ------------------------------------------------------------------------------
+# 1. Environment & Privilege Initialization
+# ------------------------------------------------------------------------------
+if [[ "${EUID}" -ne 0 ]]; then
+    echo -e "${RED}Security Error: Please run this script as root (sudo bash $0).${NC}"
+    exit 1
+fi
 
-# Expanded High-Speed & Stealth Port Array (Strictly avoids sensitive ports)
-STEALTH_PORTS=(34872 41956 47984 53281 58914 62749 51423)
+init_environment() {
+    if [[ ! -d "$INSTALL_DIR" ]]; then
+        mkdir -p "$INSTALL_DIR"
+    fi
+    chmod 700 "$INSTALL_DIR"
 
-# Protected sensitive ports that must NEVER be touched or removed
-PROTECTED_PORTS=(21 22 25 53 80 110 143 443 465 587 993 995 3306 5432 8080 8443)
-
-check_root() {
-    if [[ "$EUID" -ne 0 ]]; then
-        echo -e "${RED}[!] Error: This script must be run as root (sudo).${NC}"
-        exit 1
+    if [[ ! -f "$SETTINGS_FILE" ]]; then
+        cat <<EOF > "$SETTINGS_FILE"
+DEFAULT_MTU=1420
+DEFAULT_DNS="94.140.14.49, 9.9.9.9, 94.140.14.59"
+DEFAULT_ALLOWED_IPS="0.0.0.0/1, 128.0.0.0/1"
+EOF
+        chmod 600 "$SETTINGS_FILE"
     fi
 }
 
-is_protected_port() {
-    local check_p="$1"
-    for p in "${PROTECTED_PORTS[@]}"; do
-        if [[ "$check_p" == "$p" ]]; then
+init_environment
+
+if [[ -f "$SETTINGS_FILE" ]]; then
+    # shellcheck source=/dev/null
+    source "$SETTINGS_FILE"
+fi
+
+# ------------------------------------------------------------------------------
+# 2. Port Safety & Compatibility Checks
+# ------------------------------------------------------------------------------
+isSensitivePort() {
+    local port="$1"
+    local sensitive_ports=(20 21 22 23 25 53 67 68 80 110 143 443 8080 8443 3306 5432 6379 27017)
+    for sp in "${sensitive_ports[@]}"; do
+        if [[ "$port" -eq "$sp" ]]; then
             return 0
         fi
     done
     return 1
 }
 
-get_wan_iface() {
-    ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -n1
-}
-
-get_public_ip() {
-    local ip=""
-    for url in "https://api.ipify.org" "https://icanhazip.com" "https://ifconfig.me/ip" "https://checkip.amazonaws.com"; do
-        ip=$(curl -s4 --max-time 4 "$url" 2>/dev/null | tr -d '[:space:]')
-        if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "$ip"
-            return 0
+isPortInUse() {
+    local port="$1"
+    local proto="${2:-udp}"
+    if command -v ss &>/dev/null; then
+        if [[ "$proto" == "udp" ]]; then
+            ss -uln 2>/dev/null | grep -qE "(:|\])${port}\s" && return 0
+        else
+            ss -tln 2>/dev/null | grep -qE "(:|\])${port}\s" && return 0
         fi
-    done
-    ip -4 addr show "$(get_wan_iface)" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1
-}
-
-deep_clean_old_wireguard() {
-    echo -e "${CYAN}[*] Performing deep clean: Removing all old WireGuard files, configs, and port rules...${NC}"
-
-    # 1. Stop and disable all wg-quick services
-    while IFS= read -r svc; do
-        [[ -z "$svc" ]] && continue
-        systemctl stop "$svc" 2>/dev/null || true
-        systemctl disable "$svc" 2>/dev/null || true
-    done < <(systemctl list-units --type=service --all 2>/dev/null | grep -oE 'wg-quick@[a-zA-Z0-9_-]+\.service' || true)
-
-    # 2. Bring down and delete all WireGuard interfaces
-    if command -v wg >/dev/null 2>&1; then
-        for iface in $(wg show interfaces 2>/dev/null || true); do
-            wg-quick down "$iface" 2>/dev/null || ip link delete dev "$iface" 2>/dev/null || true
-        done
+    elif command -v netstat &>/dev/null; then
+        if [[ "$proto" == "udp" ]]; then
+            netstat -uln 2>/dev/null | grep -qE "(:|\])${port}\s" && return 0
+        else
+            netstat -tln 2>/dev/null | grep -qE "(:|\])${port}\s" && return 0
+        fi
     fi
-    for iface in $(ip -o link show type wireguard 2>/dev/null | awk -F': ' '{print $2}' | cut -d'@' -f1 || true); do
-        ip link delete dev "$iface" 2>/dev/null || true
-    done
-
-    # 3. Kill background userspace processes
-    pkill -f "wireguard-go" 2>/dev/null || true
-    pkill -f "boringtun" 2>/dev/null || true
-
-    # 4. Wipe old WireGuard configuration directory completely
-    rm -rf "${WG_DIR}"
-    mkdir -p "${CLIENTS_DIR}"
-    chmod 700 "${WG_DIR}"
-
-    # 5. Purge old iptables/ip6tables rules while skipping protected ports
-    for ipt in iptables ip6tables; do
-        command -v "$ipt" >/dev/null 2>&1 || continue
-        for tbl in nat mangle filter; do
-            while IFS= read -r rule; do
-                [[ -z "$rule" ]] && continue
-                local skip_rule=0
-                for pport in "${PROTECTED_PORTS[@]}"; do
-                    if echo "$rule" | grep -qE "(--dport|--dports|--sport|--sports)\s+${pport}(\b|,)"; then
-                        skip_rule=1
-                        break
-                    fi
-                done
-                [[ "$skip_rule" -eq 1 ]] && continue
-                local del_rule="${rule/-A /-D }"
-                eval "$ipt -t $tbl $del_rule" 2>/dev/null || true
-            done < <($ipt -t "$tbl" -S 2>/dev/null | grep -E "(-i wg|-o wg|10\.66\.66\.|fd42:42:42:|--to-ports|--ttl-set|--set-dscp)" || true)
-        done
-    done
-
-    # 6. Clean UFW rules
-    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-        for p in "${STEALTH_PORTS[@]}"; do
-            ufw delete allow "${p}/udp" >/dev/null 2>&1 || true
-        done
-    fi
-
-    echo -e "${GREEN}[+] Deep clean complete. All old WireGuard traces removed.${NC}"
+    return 1
 }
 
-install_base_packages() {
-    echo -e "${CYAN}[*] Installing core kernel & networking dependencies...${NC}"
-    export DEBIAN_FRONTEND=noninteractive
-    export NEEDRESTART_MODE=a
-    export NEEDRESTART_SUSPEND=1
-    apt-get update -qq
-    apt-get install -y -qq wireguard wireguard-tools iptables iproute2 curl qrencode unbound ca-certificates psmisc > /dev/null 2>&1
-}
-
-configure_local_dns_override() {
-    echo -e "${CYAN}[*] Configuring high-speed internal Unbound DNS...${NC}"
-    mkdir -p /etc/unbound/unbound.conf.d
-    rm -f /etc/unbound/unbound.conf.d/root-auto-trust-anchor-file.conf 2>/dev/null || true
-
-    cat <<INNER_EOF > /etc/unbound/unbound.conf.d/wg-stealth.conf
-server:
-    num-threads: 4
-    interface: 10.66.66.1
-    interface: fd42:42:42::1
-    ip-freebind: yes
-    do-ip4: yes
-    do-ip6: yes
-    do-udp: yes
-    do-tcp: yes
-    access-control: 10.66.66.0/24 allow
-    access-control: fd42:42:42::/64 allow
-    hide-identity: yes
-    hide-version: yes
-    harden-glue: yes
-    harden-dnssec-stripped: yes
-    use-caps-for-id: yes
-    edns-buffer-size: 1232
-    prefetch: yes
-    minimal-responses: yes
-    qname-minimisation: yes
-    rrset-roundrobin: yes
-    tls-cert-bundle: /etc/ssl/certs/ca-certificates.crt
-forward-zone:
-    name: "."
-    forward-tls-upstream: yes
-    forward-addr: 1.1.1.1@853#cloudflare-dns.com
-    forward-addr: 9.9.9.9@853#dns.quad9.net
-INNER_EOF
-    systemctl enable unbound > /dev/null 2>&1 || true
-    systemctl restart unbound > /dev/null 2>&1 || true
-}
-
-apply_high_speed_sysctl() {
-    echo -e "${CYAN}[*] Applying maximum-throughput BBR kernel socket & buffer tunables...${NC}"
-    cat <<INNER_EOF > /etc/sysctl.d/99-wg-highspeed.conf
-net.ipv4.ip_forward = 1
-net.ipv6.conf.all.forwarding = 1
-net.core.default_qdisc = fq
-net.ipv4.tcp_congestion_control = bbr
-
-# Ultra-high socket buffer sizing to eliminate 10x speed throttling on 500+ Mbps lines
-net.core.rmem_max = 134217728
-net.core.wmem_max = 134217728
-net.core.rmem_default = 16777216
-net.core.wmem_default = 16777216
-net.core.optmem_max = 2048000
-net.core.netdev_max_backlog = 500000
-net.core.somaxconn = 65535
-net.ipv4.udp_rmem_min = 65536
-net.ipv4.udp_wmem_min = 65536
-
-net.ipv4.icmp_echo_ignore_broadcasts = 1
-net.ipv4.tcp_timestamps = 0
-net.ipv4.conf.all.rp_filter = 1
-net.ipv4.conf.default.rp_filter = 1
-INNER_EOF
-    sysctl --system > /dev/null 2>&1
-}
-
-prompt_qr_code() {
-    local conf_path="$1"
-    echo ""
-    read -rp "Would you like to generate a QR code for this config now? (y/N): " qr_choice
-    if [[ "$qr_choice" =~ ^[Yy]$ ]]; then
-        echo -e "\n${CYAN}--- SCAN QR CODE IN WIREGUARD CLIENT ---${NC}"
-        qrencode -t ansiutf8 < "${conf_path}"
-        echo -e "${CYAN}----------------------------------------${NC}\n"
-    fi
-}
-
-create_client_profile() {
-    source "${STATE_FILE}"
-    DNS_SERVERS="${DNS_SERVERS:-10.66.66.1, 1.1.1.1}"
-
-    echo ""
-    read -rp "Enter a name for the new client: " CLIENT_NAME
-    CLIENT_NAME=$(echo "${CLIENT_NAME}" | tr -cd 'a-zA-Z0-9_-')
-
-    if [[ -z "${CLIENT_NAME}" ]]; then
-        echo -e "${RED}[!] Invalid client name.${NC}"
-        return
-    fi
-
-    CLIENT_CONF="${CLIENTS_DIR}/${CLIENT_NAME}.conf"
-
-    echo -e "\n${CYAN}Available High-Speed & Stealth Ports:${NC}"
-    for i in "${!STEALTH_PORTS[@]}"; do
-        echo -e "  $((i+1))) UDP ${STEALTH_PORTS[$i]}"
-    done
-    read -rp "Select port number [1-${#STEALTH_PORTS[@]}] (Default: 3 -> ${PRIMARY_PORT}): " port_idx
-    if [[ "$port_idx" =~ ^[1-9][0-9]*$ ]] && (( port_idx >= 1 && port_idx <= ${#STEALTH_PORTS[@]} )); then
-        CHOSEN_PORT="${STEALTH_PORTS[$((port_idx-1))]}"
+checkVirt() {
+    local VIRT=""
+    if command -v virt-what &>/dev/null; then
+        VIRT=$(virt-what)
     else
-        CHOSEN_PORT="${PRIMARY_PORT}"
+        VIRT=$(systemd-detect-virt 2>/dev/null || true)
     fi
-
-    LAST_OCTET=1
-    while grep -q "10.66.66.$((LAST_OCTET + 1))/32" "${CONF_FILE}" 2>/dev/null; do
-        ((LAST_OCTET++))
-    done
-    CLIENT_OCTET=$((LAST_OCTET + 1))
-
-    CLIENT_PRIV_KEY=$(wg genkey)
-    CLIENT_PUB_KEY=$(echo "${CLIENT_PRIV_KEY}" | wg pubkey)
-    CLIENT_PSK=$(wg genpsk)
-
-    cat <<INNER_EOF >> "${CONF_FILE}"
-
-# BEGIN_PEER ${CLIENT_NAME}
-[Peer]
-PublicKey = ${CLIENT_PUB_KEY}
-PresharedKey = ${CLIENT_PSK}
-AllowedIPs = 10.66.66.${CLIENT_OCTET}/32, fd42:42:42::${CLIENT_OCTET}/128
-# END_PEER ${CLIENT_NAME}
-INNER_EOF
-
-    wg syncconf wg0 <(wg-quick strip wg0)
-
-    cat <<INNER_EOF > "${CLIENT_CONF}"
-[Interface]
-PrivateKey = ${CLIENT_PRIV_KEY}
-Address = 10.66.66.${CLIENT_OCTET}/32, fd42:42:42::${CLIENT_OCTET}/128
-DNS = ${DNS_SERVERS}
-MTU = 1380
-
-# Alternate Stealth Ports Available on Server: ${STEALTH_PORTS[*]}
-[Peer]
-PublicKey = ${SERVER_PUB_KEY}
-PresharedKey = ${CLIENT_PSK}
-Endpoint = ${SERVER_IP}:${CHOSEN_PORT}
-AllowedIPs = 0.0.0.0/0, ::/0
-PersistentKeepalive = 21
-INNER_EOF
-
-    chmod 600 "${CLIENT_CONF}"
-
-    echo -e "\n${GREEN}[+] Client '${CLIENT_NAME}' created successfully!${NC}"
-    echo -e "${YELLOW}[i] Copy and paste the configuration below into your WireGuard client:${NC}\n"
-    echo -e "${BOLD}==================== COPY BELOW THIS LINE ====================${NC}"
-    cat "${CLIENT_CONF}"
-    echo -e "${BOLD}==================== COPY ABOVE THIS LINE ====================${NC}"
-
-    prompt_qr_code "${CLIENT_CONF}"
+    if [[ "${VIRT}" == "openvz" ]]; then
+        echo -e "${RED}[ERROR] OpenVZ is not supported by WireGuard kernel modules.${NC}"
+        exit 1
+    fi
+    if [[ "${VIRT}" == "lxc" ]]; then
+        echo -e "${YELLOW}[WARNING] LXC container detected. WireGuard requires the kernel module enabled on the host.${NC}"
+    fi
 }
 
-deploy_server() {
-    install_base_packages
-    deep_clean_old_wireguard
-    apply_high_speed_sysctl
+cleanupOldWireguard() {
+    echo -e "\n${CYAN}[*] Checking for conflicting WireGuard interfaces & legacy rules...${NC}"
 
-    WAN_IFACE=$(get_wan_iface)
-    SERVER_IP=$(get_public_ip)
+    systemctl stop "wg-quick@*" >/dev/null 2>&1 || true
+    systemctl disable "wg-quick@*" >/dev/null 2>&1 || true
 
-    wg genkey | tee "${WG_DIR}/server_private.key" | wg pubkey > "${WG_DIR}/server_public.key"
-    chmod 600 "${WG_DIR}/server_private.key"
-
-    SERVER_PRIV_KEY=$(cat "${WG_DIR}/server_private.key")
-    SERVER_PUB_KEY=$(cat "${WG_DIR}/server_public.key")
-
-    PORT_CSV=$(IFS=,; echo "${STEALTH_PORTS[*]}")
-
-    cat <<INNER_EOF > "${STATE_FILE}"
-WAN_IFACE="${WAN_IFACE}"
-SERVER_IP="${SERVER_IP}"
-PRIMARY_PORT="${PRIMARY_PORT}"
-PORT_CSV="${PORT_CSV}"
-SERVER_PUB_KEY="${SERVER_PUB_KEY}"
-INNER_EOF
-
-    echo -e "${CYAN}[*] Generating Server wg0.conf with zero-bottleneck high-speed hooks...${NC}"
-
-    cat <<INNER_EOF > "${CONF_FILE}"
-[Interface]
-Address = 10.66.66.1/24, fd42:42:42::1/64
-ListenPort = ${PRIMARY_PORT}
-PrivateKey = ${SERVER_PRIV_KEY}
-MTU = 1380
-
-# 1. Multi-Port Stealth Hopping & Ingress Acceptance
-PostUp = iptables -I INPUT 1 -p udp --dport ${PRIMARY_PORT} -j ACCEPT
-PostUp = iptables -I INPUT 1 -p udp -m multiport --dports ${PORT_CSV} -j ACCEPT
-PostUp = ip6tables -I INPUT 1 -p udp --dport ${PRIMARY_PORT} -j ACCEPT
-PostUp = ip6tables -I INPUT 1 -p udp -m multiport --dports ${PORT_CSV} -j ACCEPT
-PostUp = iptables -t nat -A PREROUTING -i ${WAN_IFACE} -p udp -m multiport --dports ${PORT_CSV} -j REDIRECT --to-ports ${PRIMARY_PORT}
-PostUp = ip6tables -t nat -A PREROUTING -i ${WAN_IFACE} -p udp -m multiport --dports ${PORT_CSV} -j REDIRECT --to-ports ${PRIMARY_PORT}
-
-# 2. Location Override & DNS Routing
-PostUp = iptables -A INPUT -i wg0 -p udp --dport 53 -j ACCEPT
-PostUp = iptables -A INPUT -i wg0 -p tcp --dport 53 -j ACCEPT
-PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o wg0 -j ACCEPT
-PostUp = iptables -t nat -A POSTROUTING -s 10.66.66.0/24 -o ${WAN_IFACE} -j MASQUERADE
-PostUp = ip6tables -A FORWARD -i wg0 -j ACCEPT; ip6tables -A FORWARD -o wg0 -j ACCEPT
-PostUp = ip6tables -t nat -A POSTROUTING -s fd42:42:42::/64 -o ${WAN_IFACE} -j MASQUERADE
-
-# 3. High-Speed TCP MSS Clamping (Prevents Fragmentation)
-PostUp = iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-PostUp = ip6tables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-
-# 4. Stealth TTL & DSCP Header Masking
-PostUp = iptables -t mangle -A POSTROUTING -s 10.66.66.0/24 -o ${WAN_IFACE} -j TTL --ttl-set 64
-PostUp = iptables -t mangle -A POSTROUTING -o ${WAN_IFACE} -p udp --sport ${PRIMARY_PORT} -j DSCP --set-dscp 0
-
-# 5. Unrestricted High-Speed FQ Queueing (Zero Rate-Limit Bottlenecks)
-PostUp = tc qdisc replace dev wg0 root fq
-
-# --- POST-DOWN ---
-PostDown = iptables -D INPUT -p udp --dport ${PRIMARY_PORT} -j ACCEPT
-PostDown = iptables -D INPUT -p udp -m multiport --dports ${PORT_CSV} -j ACCEPT
-PostDown = ip6tables -D INPUT -p udp --dport ${PRIMARY_PORT} -j ACCEPT
-PostDown = ip6tables -D INPUT -p udp -m multiport --dports ${PORT_CSV} -j ACCEPT
-PostDown = iptables -t nat -D PREROUTING -i ${WAN_IFACE} -p udp -m multiport --dports ${PORT_CSV} -j REDIRECT --to-ports ${PRIMARY_PORT}
-PostDown = ip6tables -t nat -D PREROUTING -i ${WAN_IFACE} -p udp -m multiport --dports ${PORT_CSV} -j REDIRECT --to-ports ${PRIMARY_PORT}
-PostDown = iptables -D INPUT -i wg0 -p udp --dport 53 -j ACCEPT
-PostDown = iptables -D INPUT -i wg0 -p tcp --dport 53 -j ACCEPT
-PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o wg0 -j ACCEPT
-PostDown = iptables -t nat -D POSTROUTING -s 10.66.66.0/24 -o ${WAN_IFACE} -j MASQUERADE
-PostDown = ip6tables -D FORWARD -i wg0 -j ACCEPT; ip6tables -D FORWARD -o wg0 -j ACCEPT
-PostDown = ip6tables -t nat -D POSTROUTING -s fd42:42:42::/64 -o ${WAN_IFACE} -j MASQUERADE
-PostDown = iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-PostDown = ip6tables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-PostDown = iptables -t mangle -D POSTROUTING -s 10.66.66.0/24 -o ${WAN_IFACE} -j TTL --ttl-set 64
-PostDown = iptables -t mangle -D POSTROUTING -o ${WAN_IFACE} -p udp --sport ${PRIMARY_PORT} -j DSCP --set-dscp 0
-INNER_EOF
-
-    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-        for sp in "${STEALTH_PORTS[@]}"; do
-            ufw allow "${sp}/udp" >/dev/null 2>&1 || true
-        done
+    if command -v wg-quick >/dev/null 2>&1; then
+        wg-quick down wg0 >/dev/null 2>&1 || true
+        wg-quick down wg1 >/dev/null 2>&1 || true
     fi
 
-    chmod 600 "${CONF_FILE}"
-    systemctl enable wg-quick@wg0 > /dev/null 2>&1
-    systemctl restart wg-quick@wg0
+    ip link delete dev wg0 >/dev/null 2>&1 || true
+    ip link delete dev wg1 >/dev/null 2>&1 || true
 
-    configure_local_dns_override
+    # Clean only WireGuard-specific firewall entries (preserving SSH, web, and custom chains)
+    iptables -D FORWARD -i wg0 -j ACCEPT 2>/dev/null || true
+    iptables -D FORWARD -o wg0 -j ACCEPT 2>/dev/null || true
+    iptables -D FORWARD -i wg1 -j ACCEPT 2>/dev/null || true
+    iptables -D FORWARD -o wg1 -j ACCEPT 2>/dev/null || true
+    iptables -t nat -D POSTROUTING -s 10.18.0.0/24 -j MASQUERADE 2>/dev/null || true
+    iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+    iptables -t mangle -D POSTROUTING -j TTL --ttl-set 64 2>/dev/null || true
 
-    if systemctl is-active --quiet unbound; then
-        DNS_SERVERS="10.66.66.1, 1.1.1.1"
-    else
-        DNS_SERVERS="1.1.1.1, 9.9.9.9"
-    fi
-    echo "DNS_SERVERS=\"${DNS_SERVERS}\"" >> "${STATE_FILE}"
+    echo -e "${GREEN}[✔] Pre-installation checks complete. Sensitive services protected.${NC}"
+}
 
-    echo -e "${GREEN}[+] Server deployed with maximum throughput at full 500+ Mbps capacity!${NC}"
+# ------------------------------------------------------------------------------
+# 3. Interactive Installation & Port Selection
+# ------------------------------------------------------------------------------
+install_wireguard_wizard() {
+    checkVirt
+    cleanupOldWireguard
 
-    while true; do
-        create_client_profile
-        echo ""
-        read -rp "Would you like to add another client/user? (y/N): " add_more
-        if [[ ! "$add_more" =~ ^[Yy]$ ]]; then
+    echo -e "\n${PURPLE}=================================================================${NC}"
+    echo -e "          ${GREEN}${BOLD}🍪 WireGuard Server Setup: Port & Network Options${NC}"
+    echo -e "${PURPLE}=================================================================${NC}"
+
+    # Auto-detect public IP
+    local DETECTED_IP=""
+    local services=("https://api.ipify.org" "https://ifconfig.me" "https://icanhazip.com")
+    for svc in "${services[@]}"; do
+        DETECTED_IP=$(curl -4 -sSf --max-time 2 "$svc" 2>/dev/null || true)
+        if [[ -n "$DETECTED_IP" && "$DETECTED_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             break
         fi
     done
-}
+    if [[ -z "$DETECTED_IP" ]]; then
+        DETECTED_IP=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1' | head -n1 || echo "127.0.0.1")
+    fi
 
-add_client() {
-    if [[ ! -f "${CONF_FILE}" ]]; then
-        echo -e "${YELLOW}[!] WireGuard server not initialized yet. Deploying now...${NC}"
-        deploy_server
-    else
-        create_client_profile
-    fi
-}
+    read -rp "IPv4 public address for server: " -e -i "${DETECTED_IP}" SERVER_PUB_IP
 
-view_client() {
-    echo ""
-    if [[ ! -d "${CLIENTS_DIR}" ]] || [[ -z "$(ls -A "${CLIENTS_DIR}" 2>/dev/null)" ]]; then
-        echo -e "${YELLOW}[!] No clients found.${NC}"
-        return
-    fi
-    echo -e "${CYAN}Existing Clients:${NC}"
-    mapfile -t CLIENT_FILES < <(ls -1 "${CLIENTS_DIR}"/*.conf 2>/dev/null)
-    for i in "${!CLIENT_FILES[@]}"; do
-        cname=$(basename "${CLIENT_FILES[$i]}" .conf)
-        echo -e "  $((i+1))) ${cname}"
-    done
-    read -rp "Select client number to view: " c_idx
-    if [[ "$c_idx" =~ ^[1-9][0-9]*$ ]] && (( c_idx >= 1 && c_idx <= ${#CLIENT_FILES[@]} )); then
-        TARGET_CONF="${CLIENT_FILES[$((c_idx-1))]}"
-        echo -e "\n${BOLD}==================== COPY BELOW THIS LINE ====================${NC}"
-        cat "${TARGET_CONF}"
-        echo -e "${BOLD}==================== COPY ABOVE THIS LINE ====================${NC}"
-        prompt_qr_code "${TARGET_CONF}"
-    else
-        echo -e "${RED}[!] Invalid selection.${NC}"
-    fi
-}
+    # Auto-detect default network interface
+    local DETECTED_NIC
+    DETECTED_NIC=$(ip -4 route show default 2>/dev/null | awk '/dev/ {for (i=1; i<=NF; i++) if ($i == "dev") print $(i+1)}' | head -n1 || true)
+    [[ -z "$DETECTED_NIC" ]] && DETECTED_NIC="eth0"
+    read -rp "Public network interface: " -e -i "${DETECTED_NIC}" SERVER_PUB_NIC
 
-revoke_client() {
-    echo ""
-    if [[ ! -d "${CLIENTS_DIR}" ]] || [[ -z "$(ls -A "${CLIENTS_DIR}" 2>/dev/null)" ]]; then
-        echo -e "${YELLOW}[!] No clients to revoke.${NC}"
-        return
-    fi
-    echo -e "${CYAN}Existing Clients:${NC}"
-    mapfile -t CLIENT_FILES < <(ls -1 "${CLIENTS_DIR}"/*.conf 2>/dev/null)
-    for i in "${!CLIENT_FILES[@]}"; do
-        cname=$(basename "${CLIENT_FILES[$i]}" .conf)
-        echo -e "  $((i+1))) ${cname}"
-    done
-    read -rp "Select client number to revoke: " c_idx
-    if [[ "$c_idx" =~ ^[1-9][0-9]*$ ]] && (( c_idx >= 1 && c_idx <= ${#CLIENT_FILES[@]} )); then
-        TARGET_CONF="${CLIENT_FILES[$((c_idx-1))]}"
-        CLIENT_NAME=$(basename "${TARGET_CONF}" .conf)
-        sed -i "/# BEGIN_PEER ${CLIENT_NAME}/,/# END_PEER ${CLIENT_NAME}/d" "${CONF_FILE}"
-        rm -f "${TARGET_CONF}"
-        wg syncconf wg0 <(wg-quick strip wg0)
-        echo -e "${GREEN}[+] Client '${CLIENT_NAME}' revoked and removed.${NC}"
-    else
-        echo -e "${RED}[!] Invalid selection.${NC}"
-    fi
-}
+    read -rp "WireGuard interface name: " -e -i "wg0" SERVER_WG_NIC
+    read -rp "Server WireGuard internal IPv4: " -e -i "10.18.0.1" SERVER_WG_IPV4
 
-rotate_stealth_ports() {
-    if [[ ! -f "${CONF_FILE}" ]]; then
-        echo -e "${RED}[!] Deploy the server first.${NC}"
-        return
-    fi
-    echo -e "\n${CYAN}Current High-Speed Stealth Ports:${NC} ${STEALTH_PORTS[*]}"
-    read -rp "Enter new space-separated high UDP ports (1024-65535): " -a NEW_PORTS
-    if [[ ${#NEW_PORTS[@]} -eq 0 ]]; then
-        return
-    fi
-    FILTERED_PORTS=()
-    for np in "${NEW_PORTS[@]}"; do
-        if is_protected_port "$np"; then
-            echo -e "${RED}[!] Skipping protected port ${np}.${NC}"
-        elif [[ "$np" =~ ^[0-9]+$ ]] && (( np >= 1024 && np <= 65535 )); then
-            FILTERED_PORTS+=("$np")
+    # Interactive Port Configuration
+    echo -e "\n${CYAN}${BOLD}Select WireGuard UDP Port:${NC}"
+    echo -e "   1) ${GREEN}51820${NC} (Official WireGuard Standard Port)"
+    echo -e "   2) ${GREEN}4500${NC}  (IPsec NAT-Traversal UDP | Common Tunnel Port)"
+    echo -e "   3) ${GREEN}3478${NC}  (STUN / WebRTC Media UDP)"
+    echo -e "   4) ${GREEN}41194${NC} (Disguised High UDP Port)"
+    echo -e "   5) Random High Port (49152-65535)"
+    echo -e "   6) Custom Port"
+
+    local SELECTED_PORT=""
+    while true; do
+        read -rp "Select Port option [1-6, default 1 (51820)]: " PORT_CHOICE
+        PORT_CHOICE=${PORT_CHOICE:-1}
+
+        # Handle direct numerical inputs
+        if [[ "$PORT_CHOICE" =~ ^[0-9]+$ ]] && [[ "$PORT_CHOICE" -ge 1024 && "$PORT_CHOICE" -le 65535 ]]; then
+            if isSensitivePort "$PORT_CHOICE"; then
+                echo -e "${RED}[!] Port ${PORT_CHOICE} is a reserved service port (conflicts with Web/SSH/Mail). Choose another.${NC}"
+                continue
+            fi
+            if isPortInUse "$PORT_CHOICE" "udp"; then
+                echo -e "${YELLOW}[!] Warning: Port ${PORT_CHOICE}/udp is already bound on this host. Choose another.${NC}"
+                continue
+            fi
+            SELECTED_PORT="$PORT_CHOICE"
+            break
         fi
+
+        case "$PORT_CHOICE" in
+            1) SELECTED_PORT=51820 ; break ;;
+            2) SELECTED_PORT=4500 ; break ;;
+            3) SELECTED_PORT=3478 ; break ;;
+            4) SELECTED_PORT=41194 ; break ;;
+            5)
+                SELECTED_PORT=$(( (RANDOM % 16383) + 49152 ))
+                echo -e "${GREEN}[✔] Generated Random Port: ${SELECTED_PORT}/udp${NC}"
+                break
+                ;;
+            6)
+                while true; do
+                    read -rp "Enter Custom WireGuard Port [1024-65535]: " -e -i "51820" CUSTOM_PORT
+                    if ! [[ "$CUSTOM_PORT" =~ ^[0-9]+$ ]] || [[ "$CUSTOM_PORT" -lt 1024 || "$CUSTOM_PORT" -gt 65535 ]]; then
+                        echo -e "${RED}[!] Invalid port number.${NC}"
+                        continue
+                    fi
+                    if isSensitivePort "$CUSTOM_PORT"; then
+                        echo -e "${RED}[!] Port ${CUSTOM_PORT} conflicts with a sensitive system port. Choose another.${NC}"
+                        continue
+                    fi
+                    if isPortInUse "$CUSTOM_PORT" "udp"; then
+                        echo -e "${YELLOW}[!] Warning: Port ${CUSTOM_PORT}/udp is in use. Choose another.${NC}"
+                        continue
+                    fi
+                    SELECTED_PORT="$CUSTOM_PORT"
+                    break
+                done
+                break
+                ;;
+            *)
+                echo -e "${RED}[!] Invalid selection.${NC}"
+                ;;
+        esac
     done
-    if [[ ${#FILTERED_PORTS[@]} -eq 0 ]]; then
-        return
-    fi
-    STEALTH_PORTS=("${FILTERED_PORTS[@]}")
-    PRIMARY_PORT="${STEALTH_PORTS[0]}"
-    deploy_server
-}
 
-show_status() {
-    echo -e "\n${CYAN}=== WireGuard Interface & High-Speed Traffic Status ===${NC}"
-    wg show
-    echo -e "\n${CYAN}=== Active High-Speed Stealth UDP Ports (NAT Redirect) ===${NC}"
-    echo -e "Listening & Redirecting UDP Ports: ${GREEN}${STEALTH_PORTS[*]}${NC} -> Internal Port ${PRIMARY_PORT}"
-}
+    echo -e "${GREEN}[✔] Port selected: ${SELECTED_PORT}/udp${NC}\n"
 
-check_root
+    # Persist parameters for the core setup script
+    mkdir -p /etc/wireguard
+    chmod 700 /etc/wireguard
 
-while true; do
-    echo -e "\n${BOLD}${CYAN}============================================================${NC}"
-    echo -e "${BOLD}   WIREGUARD HIGH-SPEED & STEALTH MANAGER (STANDALONE)      ${NC}"
-    echo -e "${BOLD}${CYAN}============================================================${NC}"
-    echo -e "  ${GREEN}1)${NC} Deploy / Re-apply High-Speed Stack & Clean Wipe"
-    echo -e "  ${GREEN}2)${NC} Add New Client (Outputs Copy-Paste .conf + Optional QR)"
-    echo -e "  ${GREEN}3)${NC} View Existing Client .conf (+ Optional QR)"
-    echo -e "  ${GREEN}4)${NC} Revoke / Delete a Client"
-    echo -e "  ${GREEN}5)${NC} Customize / Rotate Stealth Ports"
-    echo -e "  ${GREEN}6)${NC} Check Tunnel Traffic & High-Speed Status"
-    echo -e "  ${GREEN}0)${NC} Exit"
-    echo -e "${BOLD}${CYAN}============================================================${NC}"
-    read -rp "Select an option [0-6]: " menu_opt
-
-    case "$menu_opt" in
-        1) deploy_server ;;
-        2) add_client ;;
-        3) view_client ;;
-        4) revoke_client ;;
-        5) rotate_stealth_ports ;;
-        6) show_status ;;
-        0) echo -e "${GREEN}Exiting.${NC}"; exit 0 ;;
-        *) echo -e "${RED}[!] Invalid option. Please choose 0-6.${NC}" ;;
-    esac
-done
+    cat << EOF > "$WG_PARAMS_FILE"
+SERVER_PUB_IP=${SERVER_PUB_IP}
+SERVER_PUB_NIC=${SERVER_PUB_NIC}
+SERVER_WG_NIC=${SERVER_WG_NIC}
+SERVER_WG_IPV4=${SERVER_WG_IPV4}
+SERVER_PORT=${SELECTED_PORT}
 EOF
+    chmod 600 "$WG_PARAMS_FILE"
+
+    echo -e "${GREEN}Executing server installation script...${NC}"
+    fetch_and_run "setup_server.sh"
+}
+
+# ------------------------------------------------------------------------------
+# 4. Modular Sub-script Fetcher & Settings Management
+# ------------------------------------------------------------------------------
+fetch_and_run() {
+    local script_name="$1"
+    local script_path="./${script_name}"
+
+    if [[ -f "$script_path" ]]; then
+        echo -e "\n${GREEN}Running local version of ${script_name}...${NC}"
+        chmod +x "$script_path"
+        "$script_path"
+    else
+        script_path="${INSTALL_DIR}/${script_name}"
+        echo -e "\n${GREEN}Fetching latest version of ${script_name}...${NC}"
+
+        if curl -sSfL "${GIT_REPO}/${script_name}" -o "$script_path"; then
+            chmod 700 "$script_path"
+            "$script_path"
+        else
+            echo -e "${RED}Error: Failed to pull ${script_name} from ${GIT_REPO}.${NC}"
+            exit 1
+        fi
+    fi
+}
+
+update_setting() {
+    local key="$1"
+    local value="$2"
+    if grep -q "^${key}=" "$SETTINGS_FILE" 2>/dev/null; then
+        sed -i "s|^${key}=.*|${key}=${value}|" "$SETTINGS_FILE"
+    else
+        echo "${key}=${value}" >> "$SETTINGS_FILE"
+    fi
+}
+
+settings_menu() {
+    while true; do
+        clear
+        print_banner
+        echo -e "${PURPLE}┌────────────────────────────────────────────────────┐${NC}"
+        echo -e "${PURPLE}│                      Settings                      │${NC}"
+        echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
+        printf "${PURPLE}│ ${GREEN}[1] Default MTU: ${NC}%-33s ${PURPLE}│${NC}\n" "${DEFAULT_MTU:-1420}"
+        printf "${PURPLE}│ ${GREEN}[2] Default DNS: ${NC}%-33s ${PURPLE}│${NC}\n" "${DEFAULT_DNS:-"94.140.14.49, 9.9.9.9, 94.140.14.59"}"
+        printf "${PURPLE}│ ${GREEN}[3] Default Allowed IPs: ${NC}%-25s ${PURPLE}│${NC}\n" "${DEFAULT_ALLOWED_IPS:-"0.0.0.0/1, 128.0.0.0/1"}"
+        echo -e "${PURPLE}│ ${GREEN}[b] Back to Main Menu                             ${PURPLE}│${NC}"
+        echo -e "${PURPLE}└────────────────────────────────────────────────────┘${NC}"
+        echo -en "${PURPLE}Select option: ${NC}"
+        read -r SET_OPT
+
+        case "$SET_OPT" in
+            1)
+                echo -en "${GREEN}Enter new Default MTU: ${NC}"
+                read -r NEW_MTU
+                update_setting "DEFAULT_MTU" "$NEW_MTU"
+                DEFAULT_MTU="$NEW_MTU"
+                ;;
+            2)
+                echo -en "${GREEN}Enter new Default DNS (comma separated): ${NC}"
+                read -r NEW_DNS
+                update_setting "DEFAULT_DNS" "\"$NEW_DNS\""
+                DEFAULT_DNS="$NEW_DNS"
+                ;;
+            3)
+                echo -en "${GREEN}Enter new Default Allowed IPs: ${NC}"
+                read -r NEW_IPS
+                update_setting "DEFAULT_ALLOWED_IPS" "\"$NEW_IPS\""
+                DEFAULT_ALLOWED_IPS="$NEW_IPS"
+                ;;
+            b) break ;;
+        esac
+    done
+}
+
+print_banner() {
+    echo -e "${PURPLE}======================================================${NC}"
+    echo -e "${GREEN}       🍪 Cookie's Easy WireGuard Manager${NC}"
+    echo -e "${PURPLE}======================================================${NC}"
+}
+
+print_menu() {
+    echo -e "${PURPLE}┌────────────────────────────────────────────────────┐${NC}"
+    echo -e "${PURPLE}│                  Main Menu Actions                 │${NC}"
+    echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
+    echo -e "${PURPLE}│ ${NC}[1] Setup WireGuard server                        ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[2] Add new client (peer)                         ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[3] Configure clients (Check/Edit/Remove)         ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[4] Backup & Restore Manager                      ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[5] Domain-Based Split Tunneling                  ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[6] Real-Time Logging (Errors)                    ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[7] Geo-IP & Anti-VPN Shield (US/CA Only)         ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[s] Settings (MTU, DNS, AllowedIPs)               ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${RED}[r] Remove WireGuard server from this system      ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[q] Exit                                          ${PURPLE}│${NC}"
+    echo -e "${PURPLE}└────────────────────────────────────────────────────┘${NC}"
+}
+
+# ------------------------------------------------------------------------------
+# 5. Execution Loop
+# ------------------------------------------------------------------------------
+main() {
+    while true; do
+        clear
+        print_banner
+        print_menu
+        echo -en "${GREEN}Option: ${NC}"
+        read -r OPTION
+
+        case "$OPTION" in
+            1) install_wireguard_wizard ;;
+            2) fetch_and_run "add_client.sh" ;;
+            3) fetch_and_run "user_manager.sh" ;;
+            4) fetch_and_run "backup_manager.sh" ;;
+            5) fetch_and_run "domain_bypass.sh" ;;
+            6) 
+                echo -e "\n${GREEN}Starting Real-Time Logging for WireGuard errors (last 12 hours)...${NC}"
+                echo -e "${PURPLE}Press Ctrl+C to stop logging and return to menu.${NC}\n"
+                journalctl -u wg-quick@wg0.service --since "12 hours ago" -p err -f || true
+                echo -en "\n${GREEN}Press Enter to continue...${NC}"
+                read -r
+                ;;
+            7) fetch_and_run "geo_vpn_filter.sh" ;;
+            s) settings_menu ;;
+            r)
+                fetch_and_run "remove_server.sh"
+                echo -e "${GREEN}Cleaning up environment...${NC}"
+                rm -rf "$INSTALL_DIR"
+                break
+                ;;
+            q)
+                echo -e "${PURPLE}Exit: The system was not modified.${NC}"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Invalid option.${NC}"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+main
