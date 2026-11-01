@@ -259,9 +259,9 @@ set_sysctl "net.core.wmem_default" "262144"
 set_sysctl "net.core.netdev_max_backlog" "10000"
 set_sysctl "net.ipv4.tcp_rmem" "4096 87380 16777216"
 set_sysctl "net.ipv4.tcp_wmem" "4096 65536 16777216"
-# Security Hardening
-set_sysctl "net.ipv4.conf.all.rp_filter" "1"
-set_sysctl "net.ipv4.conf.default.rp_filter" "1"
+# Security Hardening & Asymmetric Split-Route Compatibility
+set_sysctl "net.ipv4.conf.all.rp_filter" "2"
+set_sysctl "net.ipv4.conf.default.rp_filter" "2"
 set_sysctl "net.ipv4.conf.all.accept_redirects" "0"
 set_sysctl "net.ipv4.conf.all.send_redirects" "0"
 set_sysctl "net.ipv4.conf.all.accept_source_route" "0"
