@@ -496,7 +496,8 @@ ${CLIENT_CONF_MTU}
 PublicKey = ${SERVER_PUB_KEY}
 PresharedKey = ${CLIENT_PRE_SHARED_KEY}
 Endpoint = ${ENDPOINT}
-AllowedIPs = ${CLIENT_CONF_ALLOWED_IPS}" >"${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf"
+AllowedIPs = ${CLIENT_CONF_ALLOWED_IPS}
+PersistentKeepalive = 25" >"${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf"
 
 	# Add the client as a peer to the server
 	echo -e "\n### Client ${CLIENT_NAME}
@@ -520,10 +521,27 @@ AllowedIPs = ${CLIENT_WG_IPV4}/32,${CLIENT_WG_IPV6}/128" >>"/etc/wireguard/${SER
 	echo -e "\n${ORANGE}For security, we will encrypt your client configuration file.${NC}"
 	echo -e "${ORANGE}Please provide a password. You will need this password to view or edit the config later.${NC}"
 
+	while true; do
+		read -rsp "Enter encryption password (min 4 chars): " PASS1
+		echo ""
+		if [[ ${#PASS1} -lt 4 ]]; then
+			echo -e "${RED}Password must be at least 4 characters long. Please try again.${NC}"
+			continue
+		fi
+		read -rsp "Confirm encryption password: " PASS2
+		echo ""
+		if [[ "$PASS1" != "$PASS2" ]]; then
+			echo -e "${RED}Passwords do not match. Please try again.${NC}"
+			continue
+		fi
+		break
+	done
+
 	mkdir -p /etc/wireguard/clients
 	ENC_FILE="/etc/wireguard/clients/${CLIENT_NAME}.conf.enc"
 
-	openssl enc -aes-256-cbc -salt -pbkdf2 -in "${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf" -out "$ENC_FILE"
+	CLIENT_ENC_PASS="$PASS1" openssl enc -aes-256-cbc -salt -pbkdf2 -pass env:CLIENT_ENC_PASS -in "${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf" -out "$ENC_FILE"
+	unset PASS1 PASS2
 	if [[ $? -eq 0 ]]; then
 		shred -u "${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf" 2>/dev/null || rm -f "${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf"
 		echo -e "${GREEN}Configuration securely encrypted and saved to $ENC_FILE${NC}"

@@ -118,7 +118,7 @@ EOF
 
 wg set wg0 peer "$DEVICE_PUBLIC" allowed-ips "$CLIENT_IP/32"
 
-# P3: Encryption of client config (Prompts twice for confirmation)
+# P3: Encryption of client config
 get_master_pass() {
     if [[ -z "${MASTER_PASS:-}" ]]; then
         while true; do
