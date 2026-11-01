@@ -318,6 +318,8 @@ PostDown = ip6tables -t nat -D POSTROUTING -o ${SERVER_PUB_NIC} -j MASQUERADE" >
 
 	# Enable routing on the server
 	echo "net.ipv4.ip_forward = 1
+net.ipv4.conf.all.rp_filter = 2
+net.ipv4.conf.default.rp_filter = 2
 net.ipv6.conf.all.forwarding = 1
 net.ipv6.conf.all.disable_ipv6 = 0
 net.ipv6.conf.default.disable_ipv6 = 0
@@ -485,6 +487,8 @@ function newClient() {
 		fi
 	fi
 
+	KEEPALIVE=$((15 + RANDOM % 11))
+
 	# Create client file and add the server as a peer
 	echo "[Interface]
 PrivateKey = ${CLIENT_PRIV_KEY}
@@ -496,7 +500,8 @@ ${CLIENT_CONF_MTU}
 PublicKey = ${SERVER_PUB_KEY}
 PresharedKey = ${CLIENT_PRE_SHARED_KEY}
 Endpoint = ${ENDPOINT}
-AllowedIPs = ${CLIENT_CONF_ALLOWED_IPS}" >"${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf"
+AllowedIPs = ${CLIENT_CONF_ALLOWED_IPS}
+PersistentKeepalive = ${KEEPALIVE}" >"${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf"
 
 	# Add the client as a peer to the server
 	echo -e "\n### Client ${CLIENT_NAME}
@@ -520,11 +525,30 @@ AllowedIPs = ${CLIENT_WG_IPV4}/32,${CLIENT_WG_IPV6}/128" >>"/etc/wireguard/${SER
 	echo -e "\n${ORANGE}For security, we will encrypt your client configuration file.${NC}"
 	echo -e "${ORANGE}Please provide a password. You will need this password to view or edit the config later.${NC}"
 
+	local client_enc_pass=""
+	while true; do
+		read -rsp "Enter encryption password (min 4 chars): " pass1
+		echo ""
+		read -rsp "Confirm encryption password: " pass2
+		echo ""
+		if [[ "$pass1" != "$pass2" ]]; then
+			echo -e "${RED}Passwords do not match. Please try again.${NC}"
+		elif [[ ${#pass1} -lt 4 ]]; then
+			echo -e "${RED}Password must be at least 4 characters long. Please try again.${NC}"
+		else
+			client_enc_pass="$pass1"
+			break
+		fi
+	done
+
 	mkdir -p /etc/wireguard/clients
 	ENC_FILE="/etc/wireguard/clients/${CLIENT_NAME}.conf.enc"
 
-	openssl enc -aes-256-cbc -salt -pbkdf2 -in "${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf" -out "$ENC_FILE"
-	if [[ $? -eq 0 ]]; then
+	CLIENT_ENC_PASS="$client_enc_pass" openssl enc -aes-256-cbc -salt -pbkdf2 -pass env:CLIENT_ENC_PASS -in "${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf" -out "$ENC_FILE"
+	local enc_status=$?
+	unset client_enc_pass
+
+	if [[ $enc_status -eq 0 ]]; then
 		shred -u "${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf" 2>/dev/null || rm -f "${HOME_DIR}/${SERVER_WG_NIC}-client-${CLIENT_NAME}.conf"
 		echo -e "${GREEN}Configuration securely encrypted and saved to $ENC_FILE${NC}"
 		echo -e "${ORANGE}The plain-text file has been securely deleted.${NC}"
