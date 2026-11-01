@@ -91,8 +91,6 @@ CLIENT_IP="$SERVER_PRIVATE_IP_PREFIX.$NEXT_IP"
 
 CLIENT_CONF="/etc/wireguard/clients/$DEVICE_NAME.conf"
 
-KEEPALIVE=$((15 + RANDOM % 11))
-
 cat <<EOF > "$CLIENT_CONF"
 [Interface]
 PrivateKey = $DEVICE_PRIVATE
@@ -104,7 +102,6 @@ MTU = $MTU
 PublicKey = $SERVER_PUBLIC
 Endpoint = $IP_PORT
 AllowedIPs = $ALLOWED_IPS
-PersistentKeepalive = $KEEPALIVE
 EOF
 
 chmod 600 "$CLIENT_CONF"
@@ -125,19 +122,13 @@ get_master_pass() {
     if [[ -z "${MASTER_PASS:-}" ]]; then
         while true; do
             echo -en "${GREEN}Enter Master Password for Client Encryption (min 4 chars): ${NC}"
-            read -rs pass1
+            read -rs MASTER_PASS
             echo
-            echo -en "${GREEN}Confirm Master Password: ${NC}"
-            read -rs pass2
-            echo
-            if [[ "$pass1" != "$pass2" ]]; then
-                echo -e "${RED}Passwords do not match. Please try again.${NC}"
-            elif [[ ${#pass1} -lt 4 ]]; then
-                echo -e "${RED}Password must be at least 4 characters long. Please try again.${NC}"
-            else
-                MASTER_PASS="$pass1"
+            if [[ ${#MASTER_PASS} -ge 4 ]]; then
                 export MASTER_PASS
                 break
+            else
+                echo -e "${RED}Password must be at least 4 characters long. Please try again.${NC}"
             fi
         done
     fi
