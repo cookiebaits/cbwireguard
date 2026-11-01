@@ -32,7 +32,7 @@ init_environment() {
 
     if [[ ! -f "$SETTINGS_FILE" ]]; then
         cat <<EOF > "$SETTINGS_FILE"
-DEFAULT_MTU=1420
+DEFAULT_MTU=1360
 DEFAULT_DNS="94.140.14.49, 9.9.9.9, 94.140.14.59"
 DEFAULT_ALLOWED_IPS="0.0.0.0/1, 128.0.0.0/1"
 EOF
@@ -78,7 +78,7 @@ strip_clear_from_script() {
     fi
 }
 
-# Safe bounded iptables rule deletion (prevents infinite loops or xtables lock hangs)
+# Safe bounded iptables rule deletion
 safe_ipt_del() {
     local cmd="$1"
     shift
@@ -125,13 +125,13 @@ isPortInUse() {
 }
 
 # ------------------------------------------------------------------------------
-# 2. Fast, Non-Blocking Pre-Install Cleanup & Deep Uninstaller
+# 2. Pre-Install Cleanup, Cache Purge & Deep Uninstaller
 # ------------------------------------------------------------------------------
 cleanupOldWireguard() {
     local mode="${1:-preinstall}"
     echo -e "\n${CYAN}${BOLD}[*] Cleaning up existing WireGuard instances, ports, and cached files...${NC}"
 
-    show_progress_bar 15 "Scanning configs & kernel for WireGuard interfaces/ports..."
+    show_progress_bar 10 "Scanning configs & kernel for WireGuard interfaces/ports..."
     local OLD_PORTS=()
     local OLD_IFACES=("wg0" "wg1")
 
@@ -177,7 +177,6 @@ cleanupOldWireguard() {
         OLD_IFACES+=("$kiface")
     done
 
-    # Fast depth-limited scan ONLY on *.conf files (prevents hanging on large directories in /root or /home)
     local conf_files=()
     while IFS= read -r -d '' cf; do
         conf_files+=("$cf")
@@ -203,7 +202,7 @@ cleanupOldWireguard() {
         done < <(printf "%s\n" "${OLD_PORTS[@]}" | sort -u)
     fi
 
-    show_progress_bar 35 "Stopping WireGuard systemd services and active tunnels..."
+    show_progress_bar 30 "Stopping WireGuard systemd services and active tunnels..."
     timeout 10 systemctl stop "wg-quick@*" >/dev/null 2>&1 || true
     timeout 10 systemctl disable "wg-quick@*" >/dev/null 2>&1 || true
 
@@ -214,7 +213,7 @@ cleanupOldWireguard() {
         timeout 5 systemctl disable "$unit" >/dev/null 2>&1 || true
     done
 
-    show_progress_bar 55 "Removing virtual WireGuard interfaces (${UNIQUE_IFACES[*]})..."
+    show_progress_bar 50 "Removing virtual WireGuard interfaces (${UNIQUE_IFACES[*]})..."
     for iface in "${UNIQUE_IFACES[@]}"; do
         timeout 5 systemctl stop "wg-quick@${iface}.service" >/dev/null 2>&1 || true
         timeout 5 systemctl disable "wg-quick@${iface}.service" >/dev/null 2>&1 || true
@@ -234,7 +233,7 @@ cleanupOldWireguard() {
         safe_ipt_del ip6tables -D OUTPUT -o "$iface" -j REJECT
     done
 
-    show_progress_bar 75 "Cleaning old WireGuard UDP ports (sensitive ports protected)..."
+    show_progress_bar 70 "Cleaning old WireGuard UDP ports (sensitive ports protected)..."
     local cleaned_ports_list=()
     for port in "${UNIQUE_PORTS[@]}"; do
         if isSensitivePort "$port"; then
@@ -257,7 +256,7 @@ cleanupOldWireguard() {
         fi
     done
 
-    show_progress_bar 88 "Flushing WireGuard NAT, TCPMSS mangle, and IPSet tables..."
+    show_progress_bar 85 "Flushing WireGuard NAT, TCPMSS mangle, and IPSet tables..."
     local wg_subnets=("10.18.0.0/24" "10.19.0.0/24" "10.8.0.0/24" "10.0.0.0/24" "10.66.66.0/24" "10.7.0.0/24" "10.10.0.0/24")
     local def_nic
     def_nic=$(ip -4 route show default 2>/dev/null | awk '/dev/ {for (i=1; i<=NF; i++) if ($i == "dev") print $(i+1)}' | head -n1 || echo "eth0")
@@ -287,7 +286,7 @@ cleanupOldWireguard() {
         done
     fi
 
-    show_progress_bar 96 "Purging old cached WireGuard scripts, temp files & sockets..."
+    show_progress_bar 95 "Purging old cached WireGuard scripts, temp files & sockets..."
     rm -f "${INSTALL_DIR}"/*.sh "${INSTALL_DIR}"/.*.sh 2>/dev/null || true
     rm -rf /run/wireguard /var/run/wireguard /tmp/*wireguard* /tmp/*wg* /var/tmp/*wireguard* /var/tmp/*wg* 2>/dev/null || true
     rm -f /var/cache/apt/archives/*wireguard* /etc/wireguard/wg*.conf /etc/wireguard/params /etc/wireguard/manager.env /etc/wireguard/.*.swp 2>/dev/null || true
@@ -317,8 +316,6 @@ deep_remove_wireguard() {
         return 0
     fi
 
-    # 1. Non-blocking companion remove_server.sh execution:
-    #    Uses `yes "y"` + `timeout 15` so any internal `read` prompt never hangs at 10%!
     show_progress_bar 10 "Running uninstaller script (auto-confirming prompts)..."
     local rem_script=""
     if [[ -f "./remove_server.sh" ]]; then
@@ -335,7 +332,6 @@ deep_remove_wireguard() {
         yes "y" 2>/dev/null | timeout 15 "$rem_script" >/dev/null 2>&1 || true
     fi
 
-    # 2. Run fast, non-blocking interface, service, port, and cache cleanup
     cleanupOldWireguard "deep"
 
     show_progress_bar 50 "Unloading WireGuard kernel module..."
@@ -389,10 +385,10 @@ deep_remove_wireguard() {
 }
 
 # ------------------------------------------------------------------------------
-# 3. Max Speed (BBR + 64MB Buffers + Offload) & Security/Location Masking
+# 3. Max Speed (BBR + 64MB Buffers + MTU 1360 + MSS Clamping) & Masking
 # ------------------------------------------------------------------------------
 apply_speed_and_stealth_optimizations() {
-    echo -e "\n${CYAN}${BOLD}[*] Applying Max Speed (BBR + 64MB Buffers) & Security/Location Masking...${NC}"
+    echo -e "\n${CYAN}${BOLD}[*] Applying Max Speed (BBR + 64MB Buffers + MTU 1360 Fix for Slow Receive) & Security Masking...${NC}"
 
     show_progress_bar 20 "Loading BBR congestion control and packet mangle kernel modules..."
     modprobe tcp_bbr >/dev/null 2>&1 || true
@@ -460,6 +456,7 @@ SYSCTL_EOF
     local def_nic
     def_nic=$(ip -4 route show default 2>/dev/null | awk '/dev/ {for (i=1; i<=NF; i++) if ($i == "dev") print $(i+1)}' | head -n1 || echo "eth0")
 
+    ip link set dev wg0 mtu 1360 2>/dev/null || true
     ip link set dev wg0 txqueuelen 10000 2>/dev/null || true
     ip link set dev "$def_nic" txqueuelen 10000 2>/dev/null || true
 
@@ -467,7 +464,7 @@ SYSCTL_EOF
         ethtool -K "$def_nic" gro on gso on tso on >/dev/null 2>&1 || true
     fi
 
-    show_progress_bar 90 "Applying TCP MSS clamping, TTL=64 masking, and DNS ECS privacy..."
+    show_progress_bar 90 "Applying bidirectional TCP MSS clamping (fixes slow receive speeds), TTL=64 masking & DNS ECS privacy..."
     safe_ipt_del iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
     iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
 
@@ -489,11 +486,17 @@ DNS_PRIV_EOF
         fi
     fi
 
-    show_progress_bar 100 "Speed, Security & Location Masking Optimizations Active!"
+    # Also update server wg0.conf MTU to 1360 to prevent download fragmentation
+    if [[ -f /etc/wireguard/wg0.conf ]]; then
+        sed -i 's/^MTU[[:space:]]*=.*/MTU = 1360/g' /etc/wireguard/wg0.conf 2>/dev/null || true
+        systemctl restart wg-quick@wg0 2>/dev/null || true
+    fi
+
+    show_progress_bar 100 "Speed, MTU Fix & Security Optimizations Active!"
 }
 
 # ------------------------------------------------------------------------------
-# 4. Post-Install Client Config & QR Code Display
+# 4. Post-Install Client Config & QR Code Display (Forcing MTU 1360 on Clients)
 # ------------------------------------------------------------------------------
 display_post_install_configs() {
     local found_configs=()
@@ -546,11 +549,18 @@ display_post_install_configs() {
 
     if [[ ${#unique_configs[@]} -gt 0 ]]; then
         for cfg_file in "${unique_configs[@]}"; do
+            # Ensure client .conf contains MTU = 1360 to fix slow download receive speeds
+            if ! grep -q "^[[:space:]]*MTU[[:space:]]*=" "$cfg_file" 2>/dev/null; then
+                sed -i '/^\[Interface\]/a MTU = 1360' "$cfg_file" 2>/dev/null || true
+            else
+                sed -i 's/^[[:space:]]*MTU[[:space:]]*=.*/MTU = 1360/g' "$cfg_file" 2>/dev/null || true
+            fi
+
             local cname
             cname=$(basename "$cfg_file")
             echo -e "\n${PURPLE}=================================================================${NC}"
             echo -e "${GREEN}${BOLD}📋 COPY & PASTE CLIENT CONFIGURATION (${cname}):${NC}"
-            echo -e "${YELLOW}File Location: ${cfg_file}${NC}"
+            echo -e "${YELLOW}File Location: ${cfg_file} (MTU = 1360 applied for max download speed)${NC}"
             echo -e "${PURPLE}-----------------------------------------------------------------${NC}"
             cat "$cfg_file"
             echo -e "${PURPLE}-----------------------------------------------------------------${NC}\n"
@@ -565,7 +575,7 @@ display_post_install_configs() {
 }
 
 # ------------------------------------------------------------------------------
-# 5. Pre-fetch Fresh Companion Scripts (With Progress Bar & Timeouts)
+# 5. Pre-fetch Fresh Companion Scripts (With Password Twice Confirmation Patch)
 # ------------------------------------------------------------------------------
 prefetch_companion_scripts() {
     local scripts=("setup_server.sh" "add_client.sh" "user_manager.sh" "backup_manager.sh" "domain_bypass.sh" "geo_vpn_filter.sh" "remove_server.sh")
@@ -583,21 +593,63 @@ prefetch_companion_scripts() {
 
         if [[ -f "./${s}" ]]; then
             cp -f "./${s}" "${INSTALL_DIR}/${s}"
-            strip_clear_from_script "${INSTALL_DIR}/${s}"
-            chmod 700 "${INSTALL_DIR}/${s}"
         else
-            if curl -sSfL --connect-timeout 5 --max-time 15 "${GIT_REPO}/${s}" -o "${INSTALL_DIR}/${s}" 2>/dev/null; then
-                strip_clear_from_script "${INSTALL_DIR}/${s}"
-                chmod 700 "${INSTALL_DIR}/${s}"
-            else
-                if [[ "$s" == "geo_vpn_filter.sh" ]]; then
-                    cat << 'EOF' > "${INSTALL_DIR}/geo_vpn_filter.sh"
+            curl -sSfL --connect-timeout 5 --max-time 15 "${GIT_REPO}/${s}" -o "${INSTALL_DIR}/${s}" 2>/dev/null || true
+        fi
+
+        # Patch add_client.sh / setup_server.sh so any encryption password prompt asks twice
+        local target_sub="${INSTALL_DIR}/${s}"
+        if [[ -f "$target_sub" ]]; then
+            strip_clear_from_script "$target_sub"
+            chmod 700 "$target_sub"
+
+            if command -v python3 &>/dev/null; then
+                python3 - "$target_sub" << 'PY_PASS_EOF'
+import sys, re
+
+sub_path = sys.argv[1]
+with open(sub_path, 'r', encoding='utf-8', errors='replace') as f:
+    code = f.read()
+
+# Look for single password reads like read -s -rp "Enter encryption password..." and replace with confirmation loop
+target_pattern = r'(read\s+-(?:s\s+)?rp\s+["\'][^"\']*password[^"\']*["\']\s+([a-zA-Z_][a-zA-Z0-9_]*))'
+match = re.search(target_pattern, code, re.IGNORECASE)
+
+if match and 'confirm' not in code.lower():
+    original_line = match.group(1)
+    var_name = match.group(2)
+    
+    confirm_block = f'''
+# --- Patched Password Confirmation Loop ---
+while true; do
+    {original_line}
+    if [[ ${{#{var_name}}} -lt 4 ]]; then
+        echo -e "\\033[0;31m[!] Password must be at least 4 characters long.\\033[0m"
+        continue
+    fi
+    read -s -rp "Confirm encryption password: " {var_name}_confirm
+    echo ""
+    if [[ "${{ {var_name} }}" != "${{ {var_name}_confirm }}" ]]; then
+        echo -e "\\033[0;31m[!] Passwords do not match. Please try again.\\033[0m"
+        continue
+    fi
+    break
+done
+# ------------------------------------------
+'''
+    code = code.replace(original_line, confirm_block)
+    with open(sub_path, 'w', encoding='utf-8') as f:
+        f.write(code)
+PY_PASS_EOF
+            fi
+        fi
+
+        if [[ ! -f "${INSTALL_DIR}/${s}" ]] && [[ "$s" == "geo_vpn_filter.sh" ]]; then
+            cat << 'EOF' > "${INSTALL_DIR}/geo_vpn_filter.sh"
 #!/bin/bash
 exit 0
 EOF
-                    chmod 700 "${INSTALL_DIR}/geo_vpn_filter.sh"
-                fi
-            fi
+            chmod 700 "${INSTALL_DIR}/geo_vpn_filter.sh"
         fi
     done
 }
@@ -622,7 +674,6 @@ run_setup_server() {
 
     local port_selector_file="${INSTALL_DIR}/.port_selector.sh"
     cat << 'PORT_EOF' > "$port_selector_file"
-# Safe defaults to guarantee zero unbound variables under set -u
 input_VPN_PORT="${input_VPN_PORT:-4500}"
 VPN_PORT="${VPN_PORT:-4500}"
 PORT="${PORT:-4500}"
@@ -1204,7 +1255,7 @@ settings_menu() {
         echo -e "${PURPLE}┌────────────────────────────────────────────────────┐${NC}"
         echo -e "${PURPLE}│                      Settings                      │${NC}"
         echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
-        printf "${PURPLE}│ ${GREEN}[1] Default MTU: ${NC}%-33s ${PURPLE}│${NC}\n" "${DEFAULT_MTU:-1420}"
+        printf "${PURPLE}│ ${GREEN}[1] Default MTU: ${NC}%-33s ${PURPLE}│${NC}\n" "${DEFAULT_MTU:-1360}"
         printf "${PURPLE}│ ${GREEN}[2] Default DNS: ${NC}%-33s ${PURPLE}│${NC}\n" "${DEFAULT_DNS:-"94.140.14.49, 9.9.9.9, 94.140.14.59"}"
         printf "${PURPLE}│ ${GREEN}[3] Default Allowed IPs: ${NC}%-25s ${PURPLE}│${NC}\n" "$display_ips"
         echo -e "${PURPLE}│ ${GREEN}[b] Back to Main Menu                             ${PURPLE}│${NC}"
