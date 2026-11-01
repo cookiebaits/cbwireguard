@@ -177,6 +177,7 @@ cleanupOldWireguard() {
         OLD_IFACES+=("$kiface")
     done
 
+    # Fast depth-limited scan ONLY on *.conf files (prevents hanging on large directories in /root or /home)
     local conf_files=()
     while IFS= read -r -d '' cf; do
         conf_files+=("$cf")
@@ -316,6 +317,8 @@ deep_remove_wireguard() {
         return 0
     fi
 
+    # 1. Non-blocking companion remove_server.sh execution:
+    #    Uses `yes "y"` + `timeout 15` so any internal `read` prompt never hangs at 10%!
     show_progress_bar 10 "Running uninstaller script (auto-confirming prompts)..."
     local rem_script=""
     if [[ -f "./remove_server.sh" ]]; then
@@ -332,6 +335,7 @@ deep_remove_wireguard() {
         yes "y" 2>/dev/null | timeout 15 "$rem_script" >/dev/null 2>&1 || true
     fi
 
+    # 2. Run fast, non-blocking interface, service, port, and cache cleanup
     cleanupOldWireguard "deep"
 
     show_progress_bar 50 "Unloading WireGuard kernel module..."
@@ -381,7 +385,7 @@ deep_remove_wireguard() {
     show_progress_bar 100 "Deep removal complete! (${removed_files_count} config/system files purged)"
 
     echo -e "\n${GREEN}${BOLD}[✔] Deep removal finished! All WireGuard services, cached files, folders, and ports were removed.${NC}"
-    echo -e "${GREEN}${BOLD}[✔] Sensitive ports (80, 443, 22, etc.) and host services remain completely untouched.${NC}"
+    echo -e "${GREEN}[✔] Sensitive ports (80, 443, 22, etc.) and host services remain completely untouched.${NC}"
 }
 
 # ------------------------------------------------------------------------------
