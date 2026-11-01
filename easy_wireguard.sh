@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# 🍪 Cookie's Easy WireGuard Manager (High-Speed, Stealth & Split-Tunnel Edition)
+# 🍪 Cookie's Easy WireGuard Manager (Native 1420 MTU | RTMP & Web Stable)
 # ==============================================================================
 set -euo pipefail
 
@@ -32,11 +32,14 @@ init_environment() {
 
     if [[ ! -f "$SETTINGS_FILE" ]]; then
         cat <<EOF > "$SETTINGS_FILE"
-DEFAULT_MTU=1360
-DEFAULT_DNS="1.1.1.1, 1.0.0.1"
+DEFAULT_MTU=1420
+DEFAULT_DNS="94.140.14.49, 9.9.9.9, 94.140.14.59"
 DEFAULT_ALLOWED_IPS="0.0.0.0/1, 128.0.0.0/1"
 EOF
         chmod 600 "$SETTINGS_FILE"
+    else
+        # Ensure any previous 1360 override is restored to 1420
+        sed -i 's/^DEFAULT_MTU=1360/DEFAULT_MTU=1420/' "$SETTINGS_FILE" 2>/dev/null || true
     fi
 
     [[ ! -f "$BYPASS_DOMAINS_FILE" ]] && touch "$BYPASS_DOMAINS_FILE"
@@ -95,7 +98,7 @@ safe_ipt_del() {
 # ------------------------------------------------------------------------------
 isSensitivePort() {
     local port="$1"
-    local sensitive_ports=(20 21 22 23 25 53 67 68 80 110 143 443 8080 8443 3306 5432 6379 27017)
+    local sensitive_ports=(20 21 22 23 25 53 67 68 80 110 143 443 1935 8080 8443 3306 5432 6379 27017)
     for sp in "${sensitive_ports[@]}"; do
         if [[ "$port" -eq "$sp" ]]; then
             return 0
@@ -255,10 +258,15 @@ cleanupOldWireguard() {
         fi
     done
 
-    show_progress_bar 88 "Flushing WireGuard NAT, TCPMSS mangle, and IPSet tables..."
+    show_progress_bar 88 "Flushing old WireGuard NAT, mangle, and IPSet rules..."
     local wg_subnets=("10.18.0.0/24" "10.19.0.0/24" "10.8.0.0/24" "10.0.0.0/24" "10.66.66.0/24" "10.7.0.0/24" "10.10.0.0/24")
     local def_nic
     def_nic=$(ip -4 route show default 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "dev") print $(i+1)}' | head -n1 || echo "eth0")
+
+    # Restore hardware NIC offloading in case a previous run disabled tx-checksum-ip-generic
+    if command -v ethtool &>/dev/null && [[ -n "$def_nic" ]]; then
+        ethtool -K "$def_nic" tx on rx on sg on tso on gso on gro on >/dev/null 2>&1 || true
+    fi
 
     for sub in "${wg_subnets[@]}"; do
         safe_ipt_del iptables -D FORWARD -s "$sub" -j ACCEPT
@@ -268,6 +276,7 @@ cleanupOldWireguard() {
         safe_ipt_del iptables -t nat -D POSTROUTING -s "$sub" ! -o wg0 -j MASQUERADE
     done
 
+    safe_ipt_del iptables -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
     safe_ipt_del iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
     safe_ipt_del iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
     safe_ipt_del iptables -t mangle -D POSTROUTING -o "$def_nic" -j TTL --ttl-set 64
@@ -289,6 +298,7 @@ cleanupOldWireguard() {
     rm -f "${INSTALL_DIR}"/*.sh "${INSTALL_DIR}"/.*.sh 2>/dev/null || true
     rm -rf /run/wireguard /var/run/wireguard /tmp/*wireguard* /tmp/*wg* /var/tmp/*wireguard* /var/tmp/*wg* 2>/dev/null || true
     rm -f /var/cache/apt/archives/*wireguard* /etc/wireguard/wg*.conf /etc/wireguard/params /etc/wireguard/manager.env /etc/wireguard/.*.swp 2>/dev/null || true
+    rm -f /etc/sysctl.d/99-wireguard-speed-stealth.conf /etc/dnsmasq.d/00-wg-location-stealth.conf 2>/dev/null || true
     systemctl daemon-reload >/dev/null 2>&1 || true
 
     show_progress_bar 100 "Cleanup & cache purge complete!"
@@ -300,7 +310,7 @@ cleanupOldWireguard() {
         else
             echo -e "  ${GREEN}├─ Old Ports Freed:${NC}    None active"
         fi
-        echo -e "  ${GREEN}└─ Cache & Security:${NC}   Cached WireGuard files purged; sensitive ports (80, 443, 22) untouched."
+        echo -e "  ${GREEN}└─ Cache & Security:${NC}   Cached WireGuard files purged; sensitive ports (80, 443, 22, 1935) untouched."
     fi
 }
 
@@ -380,63 +390,28 @@ deep_remove_wireguard() {
     show_progress_bar 100 "Deep removal complete! (${removed_files_count} config/system files purged)"
 
     echo -e "\n${GREEN}${BOLD}[✔] Deep removal finished! All WireGuard services, cached files, folders, and ports were removed.${NC}"
-    echo -e "${GREEN}[✔] Sensitive ports (80, 443, 22, etc.) and host services remain completely untouched.${NC}"
+    echo -e "${GREEN}[✔] Sensitive ports (80, 443, 22, 1935, etc.) and host services remain completely untouched.${NC}"
 }
 
 # ------------------------------------------------------------------------------
-# 3. Max Speed Tuning & Packet-Loss Prevention Engine
+# 3. Non-Invasive Kernel BBR & Socket Tuning (Leaves 1420 MTU & NIC Offload Intact)
 # ------------------------------------------------------------------------------
-apply_speed_and_stealth_optimizations() {
-    echo -e "\n${CYAN}${BOLD}[*] Applying Speed Tuning (BBR, Buffer Alignment, PMTU Clamping & VirtIO Fix)...${NC}"
+apply_safe_kernel_bbr_tuning() {
+    echo -e "\n${CYAN}${BOLD}[*] Ensuring BBR Congestion Control & Hardware Offload for 1420 MTU + RTMP...${NC}"
 
-    show_progress_bar 15 "Loading BBR congestion control and packet mangle kernel modules..."
     modprobe tcp_bbr >/dev/null 2>&1 || true
-    modprobe iptable_nat >/dev/null 2>&1 || true
-    modprobe iptable_mangle >/dev/null 2>&1 || true
-    modprobe xt_mark >/dev/null 2>&1 || true
-    modprobe ipt_TTL >/dev/null 2>&1 || true
 
-    show_progress_bar 40 "Configuring network stack socket buffers & routing sysctl..."
-    local sysctl_file="/etc/sysctl.d/99-wireguard-speed-stealth.conf"
+    local sysctl_file="/etc/sysctl.d/99-wireguard-bbr.conf"
     cat << 'SYSCTL_EOF' > "$sysctl_file"
-# IP Forwarding & Asymmetric Routing
 net.ipv4.ip_forward = 1
-net.ipv4.conf.all.forwarding = 1
-net.ipv4.conf.all.rp_filter = 2
-net.ipv4.conf.default.rp_filter = 2
-
-# High-Throughput Buffers Without Bufferbloat
 net.core.default_qdisc = fq
+net.ipv4.tcp_mtu_probing = 1
+net.ipv4.tcp_fastopen = 3
+net.ipv4.tcp_slow_start_after_idle = 0
 net.core.rmem_max = 33554432
 net.core.wmem_max = 33554432
-net.core.rmem_default = 1048576
-net.core.wmem_default = 1048576
-net.core.optmem_max = 2048000
 net.ipv4.tcp_rmem = 4096 87380 33554432
 net.ipv4.tcp_wmem = 4096 65536 33554432
-net.ipv4.udp_rmem_min = 16384
-net.ipv4.udp_wmem_min = 16384
-net.core.netdev_max_backlog = 10000
-net.core.somaxconn = 32768
-net.ipv4.tcp_max_syn_backlog = 16384
-
-# Low-Latency TCP & PMTU Probing (Prevents Silent Packet Drops)
-net.ipv4.tcp_fastopen = 3
-net.ipv4.tcp_mtu_probing = 1
-net.ipv4.tcp_slow_start_after_idle = 0
-net.ipv4.tcp_notsent_lowat = 16384
-net.ipv4.tcp_window_scaling = 1
-net.ipv4.tcp_tw_reuse = 1
-net.ipv4.tcp_fin_timeout = 15
-
-# Security & Anti-Spoofing
-net.ipv4.tcp_syncookies = 1
-net.ipv4.icmp_echo_ignore_broadcasts = 1
-net.ipv4.icmp_ignore_bogus_error_responses = 1
-net.ipv4.conf.all.accept_redirects = 0
-net.ipv4.conf.default.accept_redirects = 0
-net.ipv4.conf.all.send_redirects = 0
-net.ipv4.conf.default.send_redirects = 0
 SYSCTL_EOF
 
     if lsmod 2>/dev/null | grep -q bbr || grep -q bbr /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null; then
@@ -445,54 +420,18 @@ SYSCTL_EOF
 
     sysctl --system -q >/dev/null 2>&1 || sysctl -p "$sysctl_file" >/dev/null 2>&1 || true
 
-    show_progress_bar 65 "Calibrating NIC queues and disabling corrupted VirtIO checksum offload..."
+    # Ensure hardware segmentation & checksum offload are ON (fixes RTMP & 1420 MTU throughput)
     local def_nic
     def_nic=$(ip -4 route show default 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "dev") print $(i+1)}' | head -n1 || echo "eth0")
-
-    ip link set dev wg0 mtu 1360 2>/dev/null || true
-    ip link set dev wg0 txqueuelen 1280 2>/dev/null || true
-    ip link set dev "$def_nic" txqueuelen 1280 2>/dev/null || true
-
-    if command -v ethtool &>/dev/null; then
-        ethtool -K "$def_nic" tx-checksum-ip-generic off >/dev/null 2>&1 || true
-        ethtool -K "$def_nic" gro on gso on tso on >/dev/null 2>&1 || true
+    if command -v ethtool &>/dev/null && [[ -n "$def_nic" ]]; then
+        ethtool -K "$def_nic" tx on rx on sg on tso on gso on gro on >/dev/null 2>&1 || true
     fi
 
-    show_progress_bar 85 "Applying bidirectional TCP MSS clamping & TTL=64 normalization..."
-    safe_ipt_del iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-    iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
-
-    safe_ipt_del iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-    iptables -t mangle -I POSTROUTING 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
-
-    safe_ipt_del iptables -t mangle -D POSTROUTING -o "$def_nic" -j TTL --ttl-set 64
-    iptables -t mangle -A POSTROUTING -o "$def_nic" -j TTL --ttl-set 64 2>/dev/null || true
-
-    safe_ipt_del ip6tables -D FORWARD -i wg0 -j REJECT
-    safe_ipt_del ip6tables -D OUTPUT -o wg0 -j REJECT
-
-    if command -v dnsmasq &>/dev/null && [[ -d /etc/dnsmasq.d ]]; then
-        cat << 'DNS_PRIV_EOF' > /etc/dnsmasq.d/00-wg-location-stealth.conf
-# Strip EDNS0 Client Subnet (ECS) to prevent DNS location leaks
-no-edns0
-bogus-priv
-filterwin2k
-DNS_PRIV_EOF
-        if systemctl is-active --quiet dnsmasq 2>/dev/null; then
-            timeout 5 systemctl reload dnsmasq >/dev/null 2>&1 || timeout 5 systemctl restart dnsmasq >/dev/null 2>&1 || true
-        fi
-    fi
-
-    if [[ -f /etc/wireguard/wg0.conf ]]; then
-        sed -i 's/^[[:space:]]*MTU[[:space:]]*=.*/MTU = 1360/g' /etc/wireguard/wg0.conf 2>/dev/null || true
-        systemctl restart wg-quick@wg0 2>/dev/null || true
-    fi
-
-    show_progress_bar 100 "Speed, MTU & Stability Optimizations Active!"
+    echo -e "${GREEN}[✔] Native 1420 MTU preserved; BBR & hardware TCP/UDP offloading active.${NC}"
 }
 
 # ------------------------------------------------------------------------------
-# 4. Post-Install Configs Display: Guaranteed Raw .conf AND QR Code
+# 4. Post-Install Configs Display: Guaranteed Raw .conf AND QR Code (MTU Preserved)
 # ------------------------------------------------------------------------------
 display_post_install_configs() {
     local found_configs=()
@@ -545,23 +484,12 @@ display_post_install_configs() {
 
     if [[ ${#unique_configs[@]} -gt 0 ]]; then
         for cfg_file in "${unique_configs[@]}"; do
-            # Ensure client .conf enforces MTU = 1360 and PersistentKeepalive = 25
-            if ! grep -q "^[[:space:]]*MTU[[:space:]]*=" "$cfg_file" 2>/dev/null; then
-                sed -i '/^\[Interface\]/a MTU = 1360' "$cfg_file" 2>/dev/null || true
-            else
-                sed -i 's/^[[:space:]]*MTU[[:space:]]*=.*/MTU = 1360/g' "$cfg_file" 2>/dev/null || true
-            fi
-
-            if ! grep -q "^[[:space:]]*PersistentKeepalive[[:space:]]*=" "$cfg_file" 2>/dev/null; then
-                sed -i '/^\[Peer\]/a PersistentKeepalive = 25' "$cfg_file" 2>/dev/null || true
-            fi
-
             local cname
             cname=$(basename "$cfg_file")
-            
+
             # --- DISPLAY 1: COMPLETE RAW CONFIGURATION TEXT (COPY & PASTE READY) ---
             echo -e "\n${PURPLE}╔════════════════════════════════════════════════════════════════════════════╗${NC}"
-            echo -e "${PURPLE}║ ${GREEN}${BOLD}📋 WIREGAURD CLIENT CONFIGURATION (${cname})${NC}${PURPLE} ║${NC}"
+            echo -e "${PURPLE}║ ${GREEN}${BOLD}📋 WIREGUARD CLIENT CONFIGURATION (${cname})${NC}${PURPLE} ║${NC}"
             echo -e "${PURPLE}║ ${YELLOW}Path: ${cfg_file}${NC}${PURPLE} ║${NC}"
             echo -e "${PURPLE}╠════════════════════════════════════════════════════════════════════════════╣${NC}"
             cat "$cfg_file"
@@ -684,7 +612,7 @@ SERVER_PORT="${SERVER_PORT:-4500}"
 WG_PORT="${WG_PORT:-4500}"
 
 select_safe_wg_port() {
-    local sensitive_ports=(20 21 22 23 25 53 67 68 80 110 143 443 8080 8443 3306 5432 6379 27017)
+    local sensitive_ports=(20 21 22 23 25 53 67 68 80 110 143 443 1935 8080 8443 3306 5432 6379 27017)
     is_sens() {
         local p="$1"
         for sp in "${sensitive_ports[@]}"; do [[ "$p" -eq "$sp" ]] && return 0; done
@@ -716,7 +644,7 @@ select_safe_wg_port() {
 
         if [[ "$PORT_OPT" =~ ^[0-9]+$ ]] && [[ "$PORT_OPT" -ge 1024 && "$PORT_OPT" -le 65535 ]]; then
             if is_sens "$PORT_OPT"; then
-                echo -e "\033[0;31m[!] Port ${PORT_OPT} is a sensitive service port (80/443/22/etc.). Please choose a safe port.\033[0m"
+                echo -e "\033[0;31m[!] Port ${PORT_OPT} is a sensitive service port (80/443/22/1935/etc.). Please choose a safe port.\033[0m"
                 continue
             fi
             if is_used "$PORT_OPT"; then
@@ -747,7 +675,7 @@ select_safe_wg_port() {
                         continue
                     fi
                     if is_sens "$CUSTOM_P"; then
-                        echo -e "\033[0;31m[!] Port ${CUSTOM_P} conflicts with sensitive services (80/443/22/etc.). Choose another.\033[0m"
+                        echo -e "\033[0;31m[!] Port ${CUSTOM_P} conflicts with sensitive services (80/443/22/1935/etc.). Choose another.\033[0m"
                         continue
                     fi
                     if is_used "$CUSTOM_P"; then
@@ -776,33 +704,33 @@ select_safe_wg_port() {
 
 select_safe_dns_resolver() {
     echo -e "\033[0;36m\033[1mSelect DNS Resolver for Clients (Standard Port 53 & Secure Anycast):\033[0m"
-    echo -e "   1) \033[0;32mCloudflare Anycast\033[0m  (1.1.1.1, 1.0.0.1 | Port 53 - Fastest Global Anycast) \033[0;35m[RECOMMENDED]\033[0m"
-    echo -e "   2) \033[0;32mAdGuard Stealth\033[0m     (94.140.14.14, 94.140.15.15 | Port 53 - Ad & Tracking Block)"
-    echo -e "   3) \033[0;32mQuad9 Swiss Shield\033[0m  (9.9.9.9, 149.112.112.112 | Port 53 - Threat Intelligence)"
-    echo -e "   4) \033[0;32mGoogle Public DNS\033[0m   (8.8.8.8, 8.8.4.4 | Port 53 - High Availability Anycast)"
-    echo -e "   5) \033[0;32mMullvad Privacy\033[0m     (194.242.2.2, 194.242.2.3 | Port 53 - Strict Zero-Logs)"
-    echo -e "   6) \033[0;32mControl D Stealth\033[0m   (76.76.2.0, 76.76.10.0 | Port 53 - Uncensored Anti-Throttle)"
-    echo -e "   7) \033[0;32mOpenDNS / Cisco\033[0m     (208.67.222.222, 208.67.220.220 | Port 53 - Reliability)"
-    echo -e "   8) \033[0;32mDNS-over-TLS (DoT)\033[0m  (1.1.1.1, 9.9.9.9 | Encrypted Port 853 Aware)"
+    echo -e "   1) \033[0;32mAdGuard + Quad9 Default\033[0m (94.140.14.49, 9.9.9.9, 94.140.14.59 | Original Default) \033[0;35m[RECOMMENDED]\033[0m"
+    echo -e "   2) \033[0;32mCloudflare Anycast\033[0m      (1.1.1.1, 1.0.0.1 | Port 53 - Fastest Global Anycast)"
+    echo -e "   3) \033[0;32mAdGuard Stealth\033[0m         (94.140.14.14, 94.140.15.15 | Port 53 - Ad & Tracking Block)"
+    echo -e "   4) \033[0;32mQuad9 Swiss Shield\033[0m      (9.9.9.9, 149.112.112.112 | Port 53 - Threat Intelligence)"
+    echo -e "   5) \033[0;32mGoogle Public DNS\033[0m       (8.8.8.8, 8.8.4.4 | Port 53 - High Availability Anycast)"
+    echo -e "   6) \033[0;32mMullvad Privacy\033[0m         (194.242.2.2, 194.242.2.3 | Port 53 - Strict Zero-Logs)"
+    echo -e "   7) \033[0;32mControl D Stealth\033[0m       (76.76.2.0, 76.76.10.0 | Port 53 - Uncensored Anti-Throttle)"
+    echo -e "   8) \033[0;32mOpenDNS / Cisco\033[0m         (208.67.222.222, 208.67.220.220 | Port 53 - Reliability)"
     echo -e "   9) Custom DNS Resolvers"
 
-    read -rp "Select DNS Resolver [1-9, default 1 (Cloudflare)]: " DNS_OPT
+    read -rp "Select DNS Resolver [1-9, default 1]: " DNS_OPT
     DNS_OPT=${DNS_OPT:-1}
 
     case "$DNS_OPT" in
-        2) CLIENT_DNS="94.140.14.14, 94.140.15.15" ;;
-        3) CLIENT_DNS="9.9.9.9, 149.112.112.112" ;;
-        4) CLIENT_DNS="8.8.8.8, 8.8.4.4" ;;
-        5) CLIENT_DNS="194.242.2.2, 194.242.2.3" ;;
-        6) CLIENT_DNS="76.76.2.0, 76.76.10.0" ;;
-        7) CLIENT_DNS="208.67.222.222, 208.67.220.220" ;;
-        8) CLIENT_DNS="1.1.1.1, 9.9.9.9" ;;
+        2) CLIENT_DNS="1.1.1.1, 1.0.0.1" ;;
+        3) CLIENT_DNS="94.140.14.14, 94.140.15.15" ;;
+        4) CLIENT_DNS="9.9.9.9, 149.112.112.112" ;;
+        5) CLIENT_DNS="8.8.8.8, 8.8.4.4" ;;
+        6) CLIENT_DNS="194.242.2.2, 194.242.2.3" ;;
+        7) CLIENT_DNS="76.76.2.0, 76.76.10.0" ;;
+        8) CLIENT_DNS="208.67.222.222, 208.67.220.220" ;;
         9)
             read -rp "Enter Primary DNS: " -e -i "1.1.1.1" C_DNS1
             read -rp "Enter Secondary DNS: " -e -i "1.0.0.1" C_DNS2
             CLIENT_DNS="${C_DNS1}, ${C_DNS2}"
             ;;
-        1|*) CLIENT_DNS="1.1.1.1, 1.0.0.1" ;;
+        1|*) CLIENT_DNS="94.140.14.49, 9.9.9.9, 94.140.14.59" ;;
     esac
 
     echo -e "\033[0;32m[✔] Selected DNS Resolvers: ${CLIENT_DNS}\033[0m\n"
@@ -810,7 +738,6 @@ select_safe_dns_resolver() {
     CLIENT_DNS_2=$(echo "$CLIENT_DNS" | cut -d',' -f2 | tr -d ' ')
     DEFAULT_DNS="$CLIENT_DNS"
 
-    # Persist directly into settings.conf
     if [[ -f "/root/easy_wireguard/settings.conf" ]]; then
         if grep -q "^DEFAULT_DNS=" "/root/easy_wireguard/settings.conf" 2>/dev/null; then
             sed -i "s|^DEFAULT_DNS=.*|DEFAULT_DNS=\"${CLIENT_DNS}\"|" "/root/easy_wireguard/settings.conf"
@@ -912,7 +839,7 @@ PY_EOF
     rm -f "$port_selector_file"
     "$target_script"
 
-    apply_speed_and_stealth_optimizations
+    apply_safe_kernel_bbr_tuning
     display_post_install_configs
 }
 
@@ -1048,8 +975,6 @@ else:
                 if net.overlaps(excl):
                     if excl.subnet_of(net):
                         next_pool.extend(net.address_exclude(excl))
-                    else:
-                        pass
                 else:
                     next_pool.append(net)
             allowed_pool = next_pool
@@ -1308,8 +1233,8 @@ settings_menu() {
         echo -e "${PURPLE}┌────────────────────────────────────────────────────┐${NC}"
         echo -e "${PURPLE}│                      Settings                      │${NC}"
         echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
-        printf "${PURPLE}│ ${GREEN}[1] Default MTU: ${NC}%-33s ${PURPLE}│${NC}\n" "${DEFAULT_MTU:-1360}"
-        printf "${PURPLE}│ ${GREEN}[2] Default DNS: ${NC}%-33s ${PURPLE}│${NC}\n" "${DEFAULT_DNS:-"1.1.1.1, 1.0.0.1"}"
+        printf "${PURPLE}│ ${GREEN}[1] Default MTU: ${NC}%-33s ${PURPLE}│${NC}\n" "${DEFAULT_MTU:-1420}"
+        printf "${PURPLE}│ ${GREEN}[2] Default DNS: ${NC}%-33s ${PURPLE}│${NC}\n" "${DEFAULT_DNS:-"94.140.14.49, 9.9.9.9, 94.140.14.59"}"
         printf "${PURPLE}│ ${GREEN}[3] Default Allowed IPs: ${NC}%-25s ${PURPLE}│${NC}\n" "$display_ips"
         echo -e "${PURPLE}│ ${GREEN}[b] Back to Main Menu                             ${PURPLE}│${NC}"
         echo -e "${PURPLE}└────────────────────────────────────────────────────┘${NC}"
