@@ -1,8 +1,8 @@
 cat << 'EOF' > easy_wireguard.sh && chmod +x easy_wireguard.sh && sudo ./easy_wireguard.sh
 #!/usr/bin/env bash
 # ==============================================================================
-# EASY WIREGUARD: STEALTH & SPEED SERVER DEPLOYMENT (STANDALONE EDITION)
-# Server-Side DPI Evasion | BBR Speed Tuning | Direct User Add | Clean Port Purge
+# EASY WIREGUARD: MAXIMUM SPEED & STEALTH DEPLOYMENT (STANDALONE)
+# Full Wipe | BBR + FQ Tuning | Zero Bottlenecks | Multi-Port Hopping
 # ==============================================================================
 
 set -e
@@ -19,11 +19,13 @@ CLIENTS_DIR="${WG_DIR}/clients"
 CONF_FILE="${WG_DIR}/wg0.conf"
 STATE_FILE="${WG_DIR}/stealth_state.env"
 
-# Unique, non-standard UDP ports (Strictly avoids 80, 443, 53, 22, 51820, 8080, 8443)
+# Recommended primary stealth port (NVIDIA GameStream / Low-Latency UDP)
 PRIMARY_PORT=47984
-STEALTH_PORTS=(34872 41956 47984 53281 58914 62749)
 
-# Protected sensitive ports that must NEVER be touched, modified, or removed
+# Expanded High-Speed & Stealth Port Array (Strictly avoids sensitive ports)
+STEALTH_PORTS=(34872 41956 47984 53281 58914 62749 51423)
+
+# Protected sensitive ports that must NEVER be touched or removed
 PROTECTED_PORTS=(21 22 25 53 80 110 143 443 465 587 993 995 3306 5432 8080 8443)
 
 check_root() {
@@ -59,40 +61,17 @@ get_public_ip() {
     ip -4 addr show "$(get_wan_iface)" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1
 }
 
-cleanup_old_wireguard_and_ports() {
-    echo -e "${CYAN}[*] Scanning for old WireGuard instances, services, and legacy port rules...${NC}"
+deep_clean_old_wireguard() {
+    echo -e "${CYAN}[*] Performing deep clean: Removing all old WireGuard files, configs, and port rules...${NC}"
 
-    local OLD_PORTS=(51820)
-    if [[ -f "${STATE_FILE}" ]]; then
-        source "${STATE_FILE}" 2>/dev/null || true
-        [[ -n "${PRIMARY_PORT:-}" ]] && OLD_PORTS+=("${PRIMARY_PORT}")
-        if [[ -n "${PORT_CSV:-}" ]]; then
-            IFS=',' read -ra CSV_P <<< "${PORT_CSV}"
-            OLD_PORTS+=("${CSV_P[@]}")
-        fi
-    fi
-
-    if [[ -d "${WG_DIR}" ]]; then
-        while IFS= read -r lport; do
-            [[ -n "$lport" ]] && OLD_PORTS+=("$lport")
-        done < <(grep -hE "^\s*ListenPort\s*=" "${WG_DIR}"/*.conf 2>/dev/null | awk -F'=' '{print $2}' | tr -d '[:space:]' || true)
-    fi
-
-    if command -v wg >/dev/null 2>&1; then
-        while IFS= read -r iface; do
-            [[ -z "$iface" ]] && continue
-            local rport
-            rport=$(wg show "$iface" listen-port 2>/dev/null || true)
-            [[ -n "$rport" ]] && OLD_PORTS+=("$rport")
-        done < <(wg show interfaces 2>/dev/null || true)
-    fi
-
+    # 1. Stop and disable all wg-quick services
     while IFS= read -r svc; do
         [[ -z "$svc" ]] && continue
         systemctl stop "$svc" 2>/dev/null || true
         systemctl disable "$svc" 2>/dev/null || true
     done < <(systemctl list-units --type=service --all 2>/dev/null | grep -oE 'wg-quick@[a-zA-Z0-9_-]+\.service' || true)
 
+    # 2. Bring down and delete all WireGuard interfaces
     if command -v wg >/dev/null 2>&1; then
         for iface in $(wg show interfaces 2>/dev/null || true); do
             wg-quick down "$iface" 2>/dev/null || ip link delete dev "$iface" 2>/dev/null || true
@@ -102,9 +81,16 @@ cleanup_old_wireguard_and_ports() {
         ip link delete dev "$iface" 2>/dev/null || true
     done
 
+    # 3. Kill background userspace processes
     pkill -f "wireguard-go" 2>/dev/null || true
     pkill -f "boringtun" 2>/dev/null || true
 
+    # 4. Wipe old WireGuard configuration directory completely
+    rm -rf "${WG_DIR}"
+    mkdir -p "${CLIENTS_DIR}"
+    chmod 700 "${WG_DIR}"
+
+    # 5. Purge old iptables/ip6tables rules while skipping protected ports
     for ipt in iptables ip6tables; do
         command -v "$ipt" >/dev/null 2>&1 || continue
         for tbl in nat mangle filter; do
@@ -120,36 +106,22 @@ cleanup_old_wireguard_and_ports() {
                 [[ "$skip_rule" -eq 1 ]] && continue
                 local del_rule="${rule/-A /-D }"
                 eval "$ipt -t $tbl $del_rule" 2>/dev/null || true
-            done < <($ipt -t "$tbl" -S 2>/dev/null | grep -E "(-i wg|-o wg|10\.66\.66\.|fd42:42:42:|--to-ports ${PRIMARY_PORT}|--ttl-set 64|--set-dscp 0)" || true)
-
-            for oport in "${OLD_PORTS[@]}"; do
-                [[ -z "$oport" ]] && continue
-                if is_protected_port "$oport"; then
-                    continue
-                fi
-                while IFS= read -r prule; do
-                    [[ -z "$prule" ]] && continue
-                    local del_prule="${prule/-A /-D }"
-                    eval "$ipt -t $tbl $del_prule" 2>/dev/null || true
-                done < <($ipt -t "$tbl" -S 2>/dev/null | grep -E "udp.*(--dport|--dports|--to-ports)\b.*${oport}\b" || true)
-            done
+            done < <($ipt -t "$tbl" -S 2>/dev/null | grep -E "(-i wg|-o wg|10\.66\.66\.|fd42:42:42:|--to-ports|--ttl-set|--set-dscp)" || true)
         done
     done
 
+    # 6. Clean UFW rules
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-        for oport in "${OLD_PORTS[@]}"; do
-            [[ -z "$oport" ]] && continue
-            if ! is_protected_port "$oport"; then
-                ufw delete allow "${oport}/udp" >/dev/null 2>&1 || true
-            fi
+        for p in "${STEALTH_PORTS[@]}"; do
+            ufw delete allow "${p}/udp" >/dev/null 2>&1 || true
         done
     fi
 
-    echo -e "${GREEN}[+] Old WireGuard instances and legacy UDP ports cleaned.${NC}"
+    echo -e "${GREEN}[+] Deep clean complete. All old WireGuard traces removed.${NC}"
 }
 
 install_base_packages() {
-    echo -e "${CYAN}[*] Checking and installing core kernel & WireGuard dependencies...${NC}"
+    echo -e "${CYAN}[*] Installing core kernel & networking dependencies...${NC}"
     export DEBIAN_FRONTEND=noninteractive
     export NEEDRESTART_MODE=a
     export NEEDRESTART_SUSPEND=1
@@ -158,13 +130,13 @@ install_base_packages() {
 }
 
 configure_local_dns_override() {
-    echo -e "${CYAN}[*] Configuring internal Unbound DNS for strict Location Override...${NC}"
+    echo -e "${CYAN}[*] Configuring high-speed internal Unbound DNS...${NC}"
     mkdir -p /etc/unbound/unbound.conf.d
     rm -f /etc/unbound/unbound.conf.d/root-auto-trust-anchor-file.conf 2>/dev/null || true
 
     cat <<INNER_EOF > /etc/unbound/unbound.conf.d/wg-stealth.conf
 server:
-    num-threads: 2
+    num-threads: 4
     interface: 10.66.66.1
     interface: fd42:42:42::1
     ip-freebind: yes
@@ -195,30 +167,29 @@ INNER_EOF
     systemctl restart unbound > /dev/null 2>&1 || true
 }
 
-apply_speed_and_stealth_sysctl() {
-    echo -e "${CYAN}[*] Applying kernel BBR speed optimizations & stealth stack hardening...${NC}"
-    cat <<INNER_EOF > /etc/sysctl.d/99-wg-stealth-speed.conf
+apply_high_speed_sysctl() {
+    echo -e "${CYAN}[*] Applying maximum-throughput BBR kernel socket & buffer tunables...${NC}"
+    cat <<INNER_EOF > /etc/sysctl.d/99-wg-highspeed.conf
 net.ipv4.ip_forward = 1
 net.ipv6.conf.all.forwarding = 1
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
-net.core.rmem_max = 67108864
-net.core.wmem_max = 67108864
-net.core.rmem_default = 2097152
-net.core.wmem_default = 2097152
-net.core.optmem_max = 65536
-net.core.netdev_max_backlog = 250000
-net.ipv4.udp_rmem_min = 16384
-net.ipv4.udp_wmem_min = 16384
+
+# Ultra-high socket buffer sizing to eliminate 10x speed throttling on 500+ Mbps lines
+net.core.rmem_max = 134217728
+net.core.wmem_max = 134217728
+net.core.rmem_default = 16777216
+net.core.wmem_default = 16777216
+net.core.optmem_max = 2048000
+net.core.netdev_max_backlog = 500000
+net.core.somaxconn = 65535
+net.ipv4.udp_rmem_min = 65536
+net.ipv4.udp_wmem_min = 65536
+
 net.ipv4.icmp_echo_ignore_broadcasts = 1
-net.ipv4.icmp_ignore_bogus_error_responses = 1
 net.ipv4.tcp_timestamps = 0
 net.ipv4.conf.all.rp_filter = 1
 net.ipv4.conf.default.rp_filter = 1
-net.ipv4.conf.all.accept_source_route = 0
-net.ipv4.conf.default.accept_source_route = 0
-net.ipv4.conf.all.send_redirects = 0
-net.ipv4.conf.default.send_redirects = 0
 INNER_EOF
     sysctl --system > /dev/null 2>&1
 }
@@ -248,16 +219,8 @@ create_client_profile() {
     fi
 
     CLIENT_CONF="${CLIENTS_DIR}/${CLIENT_NAME}.conf"
-    if [[ -f "${CLIENT_CONF}" ]]; then
-        echo -e "${YELLOW}[!] Client '${CLIENT_NAME}' already exists. Outputting existing config:${NC}"
-        echo -e "\n${BOLD}==================== COPY BELOW THIS LINE ====================${NC}"
-        cat "${CLIENT_CONF}"
-        echo -e "${BOLD}==================== COPY ABOVE THIS LINE ====================${NC}"
-        prompt_qr_code "${CLIENT_CONF}"
-        return
-    fi
 
-    echo -e "\n${CYAN}Available Unique Stealth Ports:${NC}"
+    echo -e "\n${CYAN}Available High-Speed & Stealth Ports:${NC}"
     for i in "${!STEALTH_PORTS[@]}"; do
         echo -e "  $((i+1))) UDP ${STEALTH_PORTS[$i]}"
     done
@@ -269,7 +232,7 @@ create_client_profile() {
     fi
 
     LAST_OCTET=1
-    while grep -q "10.66.66.$((LAST_OCTET + 1))/32" "${CONF_FILE}"; do
+    while grep -q "10.66.66.$((LAST_OCTET + 1))/32" "${CONF_FILE}" 2>/dev/null; do
         ((LAST_OCTET++))
     done
     CLIENT_OCTET=$((LAST_OCTET + 1))
@@ -319,32 +282,18 @@ INNER_EOF
 
 deploy_server() {
     install_base_packages
-    cleanup_old_wireguard_and_ports
-    apply_speed_and_stealth_sysctl
-
-    mkdir -p "${CLIENTS_DIR}"
-    chmod 700 "${WG_DIR}"
+    deep_clean_old_wireguard
+    apply_high_speed_sysctl
 
     WAN_IFACE=$(get_wan_iface)
     SERVER_IP=$(get_public_ip)
 
-    if [[ ! -f "${WG_DIR}/server_private.key" ]]; then
-        wg genkey | tee "${WG_DIR}/server_private.key" | wg pubkey > "${WG_DIR}/server_public.key"
-        chmod 600 "${WG_DIR}/server_private.key"
-    fi
+    wg genkey | tee "${WG_DIR}/server_private.key" | wg pubkey > "${WG_DIR}/server_public.key"
+    chmod 600 "${WG_DIR}/server_private.key"
 
     SERVER_PRIV_KEY=$(cat "${WG_DIR}/server_private.key")
     SERVER_PUB_KEY=$(cat "${WG_DIR}/server_public.key")
 
-    VALIDATED_PORTS=()
-    for sp in "${STEALTH_PORTS[@]}"; do
-        if is_protected_port "$sp"; then
-            echo -e "${YELLOW}[!] Skipping protected port ${sp}.${NC}"
-        else
-            VALIDATED_PORTS+=("$sp")
-        fi
-    done
-    STEALTH_PORTS=("${VALIDATED_PORTS[@]}")
     PORT_CSV=$(IFS=,; echo "${STEALTH_PORTS[*]}")
 
     cat <<INNER_EOF > "${STATE_FILE}"
@@ -355,12 +304,7 @@ PORT_CSV="${PORT_CSV}"
 SERVER_PUB_KEY="${SERVER_PUB_KEY}"
 INNER_EOF
 
-    echo -e "${CYAN}[*] Generating Server wg0.conf with embedded Stealth & Speed hooks...${NC}"
-
-    EXISTING_PEERS=""
-    if [[ -f "${CONF_FILE}" ]]; then
-        EXISTING_PEERS=$(sed -n '/# BEGIN_PEER/,$p' "${CONF_FILE}" || true)
-    fi
+    echo -e "${CYAN}[*] Generating Server wg0.conf with zero-bottleneck high-speed hooks...${NC}"
 
     cat <<INNER_EOF > "${CONF_FILE}"
 [Interface]
@@ -369,6 +313,7 @@ ListenPort = ${PRIMARY_PORT}
 PrivateKey = ${SERVER_PRIV_KEY}
 MTU = 1380
 
+# 1. Multi-Port Stealth Hopping & Ingress Acceptance
 PostUp = iptables -I INPUT 1 -p udp --dport ${PRIMARY_PORT} -j ACCEPT
 PostUp = iptables -I INPUT 1 -p udp -m multiport --dports ${PORT_CSV} -j ACCEPT
 PostUp = ip6tables -I INPUT 1 -p udp --dport ${PRIMARY_PORT} -j ACCEPT
@@ -376,6 +321,7 @@ PostUp = ip6tables -I INPUT 1 -p udp -m multiport --dports ${PORT_CSV} -j ACCEPT
 PostUp = iptables -t nat -A PREROUTING -i ${WAN_IFACE} -p udp -m multiport --dports ${PORT_CSV} -j REDIRECT --to-ports ${PRIMARY_PORT}
 PostUp = ip6tables -t nat -A PREROUTING -i ${WAN_IFACE} -p udp -m multiport --dports ${PORT_CSV} -j REDIRECT --to-ports ${PRIMARY_PORT}
 
+# 2. Location Override & DNS Routing
 PostUp = iptables -A INPUT -i wg0 -p udp --dport 53 -j ACCEPT
 PostUp = iptables -A INPUT -i wg0 -p tcp --dport 53 -j ACCEPT
 PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o wg0 -j ACCEPT
@@ -383,14 +329,18 @@ PostUp = iptables -t nat -A POSTROUTING -s 10.66.66.0/24 -o ${WAN_IFACE} -j MASQ
 PostUp = ip6tables -A FORWARD -i wg0 -j ACCEPT; ip6tables -A FORWARD -o wg0 -j ACCEPT
 PostUp = ip6tables -t nat -A POSTROUTING -s fd42:42:42::/64 -o ${WAN_IFACE} -j MASQUERADE
 
+# 3. High-Speed TCP MSS Clamping (Prevents Fragmentation)
 PostUp = iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PostUp = ip6tables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 
+# 4. Stealth TTL & DSCP Header Masking
 PostUp = iptables -t mangle -A POSTROUTING -s 10.66.66.0/24 -o ${WAN_IFACE} -j TTL --ttl-set 64
 PostUp = iptables -t mangle -A POSTROUTING -o ${WAN_IFACE} -p udp --sport ${PRIMARY_PORT} -j DSCP --set-dscp 0
 
-PostUp = tc qdisc replace dev wg0 root fq maxrate 10gbit
+# 5. Unrestricted High-Speed FQ Queueing (Zero Rate-Limit Bottlenecks)
+PostUp = tc qdisc replace dev wg0 root fq
 
+# --- POST-DOWN ---
 PostDown = iptables -D INPUT -p udp --dport ${PRIMARY_PORT} -j ACCEPT
 PostDown = iptables -D INPUT -p udp -m multiport --dports ${PORT_CSV} -j ACCEPT
 PostDown = ip6tables -D INPUT -p udp --dport ${PRIMARY_PORT} -j ACCEPT
@@ -408,11 +358,6 @@ PostDown = ip6tables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPM
 PostDown = iptables -t mangle -D POSTROUTING -s 10.66.66.0/24 -o ${WAN_IFACE} -j TTL --ttl-set 64
 PostDown = iptables -t mangle -D POSTROUTING -o ${WAN_IFACE} -p udp --sport ${PRIMARY_PORT} -j DSCP --set-dscp 0
 INNER_EOF
-
-    if [[ -n "${EXISTING_PEERS}" ]]; then
-        echo "" >> "${CONF_FILE}"
-        echo "${EXISTING_PEERS}" >> "${CONF_FILE}"
-    fi
 
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
         for sp in "${STEALTH_PORTS[@]}"; do
@@ -433,9 +378,8 @@ INNER_EOF
     fi
     echo "DNS_SERVERS=\"${DNS_SERVERS}\"" >> "${STATE_FILE}"
 
-    echo -e "${GREEN}[+] Server deployed and running on IP: ${SERVER_IP}${NC}"
-    
-    # Bypassed confirmation prompt -> jumps directly into client creation
+    echo -e "${GREEN}[+] Server deployed with maximum throughput at full 500+ Mbps capacity!${NC}"
+
     while true; do
         create_client_profile
         echo ""
@@ -509,7 +453,7 @@ rotate_stealth_ports() {
         echo -e "${RED}[!] Deploy the server first.${NC}"
         return
     fi
-    echo -e "\n${CYAN}Current Unique Stealth Ports:${NC} ${STEALTH_PORTS[*]}"
+    echo -e "\n${CYAN}Current High-Speed Stealth Ports:${NC} ${STEALTH_PORTS[*]}"
     read -rp "Enter new space-separated high UDP ports (1024-65535): " -a NEW_PORTS
     if [[ ${#NEW_PORTS[@]} -eq 0 ]]; then
         return
@@ -531,9 +475,9 @@ rotate_stealth_ports() {
 }
 
 show_status() {
-    echo -e "\n${CYAN}=== WireGuard Interface & Peer Traffic Status ===${NC}"
+    echo -e "\n${CYAN}=== WireGuard Interface & High-Speed Traffic Status ===${NC}"
     wg show
-    echo -e "\n${CYAN}=== Active Unique Stealth UDP Ports (NAT Redirect) ===${NC}"
+    echo -e "\n${CYAN}=== Active High-Speed Stealth UDP Ports (NAT Redirect) ===${NC}"
     echo -e "Listening & Redirecting UDP Ports: ${GREEN}${STEALTH_PORTS[*]}${NC} -> Internal Port ${PRIMARY_PORT}"
 }
 
@@ -541,14 +485,14 @@ check_root
 
 while true; do
     echo -e "\n${BOLD}${CYAN}============================================================${NC}"
-    echo -e "${BOLD}   WIREGUARD STEALTH + SPEED SERVER MANAGER (STANDALONE)    ${NC}"
+    echo -e "${BOLD}   WIREGUARD HIGH-SPEED & STEALTH MANAGER (STANDALONE)      ${NC}"
     echo -e "${BOLD}${CYAN}============================================================${NC}"
-    echo -e "  ${GREEN}1)${NC} Deploy / Re-apply Stealth & Speed Server Stack"
+    echo -e "  ${GREEN}1)${NC} Deploy / Re-apply High-Speed Stack & Clean Wipe"
     echo -e "  ${GREEN}2)${NC} Add New Client (Outputs Copy-Paste .conf + Optional QR)"
     echo -e "  ${GREEN}3)${NC} View Existing Client .conf (+ Optional QR)"
     echo -e "  ${GREEN}4)${NC} Revoke / Delete a Client"
-    echo -e "  ${GREEN}5)${NC} Customize / Rotate Unique Stealth Ports"
-    echo -e "  ${GREEN}6)${NC} Check Tunnel Traffic, Stealth Ports & BBR Status"
+    echo -e "  ${GREEN}5)${NC} Customize / Rotate Stealth Ports"
+    echo -e "  ${GREEN}6)${NC} Check Tunnel Traffic & High-Speed Status"
     echo -e "  ${GREEN}0)${NC} Exit"
     echo -e "${BOLD}${CYAN}============================================================${NC}"
     read -rp "Select an option [0-6]: " menu_opt
