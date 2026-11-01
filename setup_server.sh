@@ -219,7 +219,10 @@ MTU = $MTU
 SaveConfig = false
 
 PostUp = ufw route allow in on wg0 out on $NETWORK_DEVICE
+PostUp = ufw route allow in on $NETWORK_DEVICE out on wg0
 PostUp = iptables -t nat -A POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
+PostUp = iptables -A FORWARD -i wg0 -o $NETWORK_DEVICE -j ACCEPT
+PostUp = iptables -A FORWARD -i $NETWORK_DEVICE -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 PostUp = iptables -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PostUp = iptables -t mangle -A POSTROUTING -o $NETWORK_DEVICE -j TTL --ttl-set 64
 PostUp = ip6tables -A FORWARD -i wg0 -j REJECT
@@ -227,7 +230,10 @@ PostUp = ip6tables -A OUTPUT -o wg0 -j REJECT
 PostUp = /root/easy_wireguard/geo_vpn_filter.sh --apply
 PreDown = /root/easy_wireguard/geo_vpn_filter.sh --remove
 PreDown = ufw route delete allow in on wg0 out on $NETWORK_DEVICE
+PreDown = ufw route delete allow in on $NETWORK_DEVICE out on wg0
 PreDown = iptables -t nat -D POSTROUTING -o $NETWORK_DEVICE -j MASQUERADE
+PreDown = iptables -D FORWARD -i wg0 -o $NETWORK_DEVICE -j ACCEPT
+PreDown = iptables -D FORWARD -i $NETWORK_DEVICE -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 PreDown = iptables -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PreDown = iptables -t mangle -D POSTROUTING -o $NETWORK_DEVICE -j TTL --ttl-set 64
 PreDown = ip6tables -D FORWARD -i wg0 -j REJECT
@@ -248,9 +254,9 @@ set_sysctl "net.core.wmem_default" "262144"
 set_sysctl "net.core.netdev_max_backlog" "10000"
 set_sysctl "net.ipv4.tcp_rmem" "4096 87380 16777216"
 set_sysctl "net.ipv4.tcp_wmem" "4096 65536 16777216"
-# Security Hardening
-set_sysctl "net.ipv4.conf.all.rp_filter" "1"
-set_sysctl "net.ipv4.conf.default.rp_filter" "1"
+# Security Hardening (Loose rp_filter = 2 prevents asymmetric routing packet drops while stopping spoofing)
+set_sysctl "net.ipv4.conf.all.rp_filter" "2"
+set_sysctl "net.ipv4.conf.default.rp_filter" "2"
 set_sysctl "net.ipv4.conf.all.accept_redirects" "0"
 set_sysctl "net.ipv4.conf.all.send_redirects" "0"
 set_sysctl "net.ipv4.conf.all.accept_source_route" "0"

@@ -102,6 +102,7 @@ MTU = $MTU
 PublicKey = $SERVER_PUBLIC
 Endpoint = $IP_PORT
 AllowedIPs = $ALLOWED_IPS
+PersistentKeepalive = 25
 EOF
 
 chmod 600 "$CLIENT_CONF"
@@ -117,19 +118,27 @@ EOF
 
 wg set wg0 peer "$DEVICE_PUBLIC" allowed-ips "$CLIENT_IP/32"
 
-# P3: Encryption of client config
+# P3: Encryption of client config (Prompts twice for confirmation)
 get_master_pass() {
     if [[ -z "${MASTER_PASS:-}" ]]; then
         while true; do
             echo -en "${GREEN}Enter Master Password for Client Encryption (min 4 chars): ${NC}"
-            read -rs MASTER_PASS
+            read -rs pass1
             echo
-            if [[ ${#MASTER_PASS} -ge 4 ]]; then
-                export MASTER_PASS
-                break
-            else
+            if [[ ${#pass1} -lt 4 ]]; then
                 echo -e "${RED}Password must be at least 4 characters long. Please try again.${NC}"
+                continue
             fi
+            echo -en "${GREEN}Confirm Master Password: ${NC}"
+            read -rs pass2
+            echo
+            if [[ "$pass1" != "$pass2" ]]; then
+                echo -e "${RED}Passwords do not match. Please try again.${NC}"
+                continue
+            fi
+            MASTER_PASS="$pass1"
+            export MASTER_PASS
+            break
         done
     fi
 }
