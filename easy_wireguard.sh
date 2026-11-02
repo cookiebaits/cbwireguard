@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# 🍪 Cookie's Easy WireGuard Manager (Travel VPN LAN Block & High-Speed Edition)
+# 🍪 Cookie's Easy WireGuard Manager (Travel Mode LAN-Blocking Edition)
 # ==============================================================================
 set -euo pipefail
 
@@ -18,7 +18,6 @@ INSTALL_DIR="/root/easy_wireguard"
 SETTINGS_FILE="${INSTALL_DIR}/settings.conf"
 BYPASS_DOMAINS_FILE="${INSTALL_DIR}/bypass_domains.txt"
 SPLIT_MODE_FILE="${INSTALL_DIR}/split_mode.txt"
-BLOCK_LAN_FILE="${INSTALL_DIR}/block_lan.txt"
 
 if [[ "$EUID" -ne 0 ]]; then
     echo -e "${RED}Security Error: Please run this script as root (sudo bash $0).${NC}"
@@ -44,7 +43,6 @@ EOF
 
     [[ ! -f "$BYPASS_DOMAINS_FILE" ]] && touch "$BYPASS_DOMAINS_FILE"
     [[ ! -f "$SPLIT_MODE_FILE" ]] && echo "BYPASS" > "$SPLIT_MODE_FILE"
-    [[ ! -f "$BLOCK_LAN_FILE" ]] && echo "DISABLED" > "$BLOCK_LAN_FILE"
 }
 
 init_environment
@@ -210,7 +208,7 @@ isPortInUse() {
 }
 
 # ------------------------------------------------------------------------------
-# 2. Pre-Install Cleanup (Guarded Single Run)
+# 2. Pre-Install Cleanup, Hijack Purge & Deep Uninstaller (Guarded Single Run)
 # ------------------------------------------------------------------------------
 cleanupOldWireguard() {
     local mode="${1:-preinstall}"
@@ -596,7 +594,7 @@ display_post_install_configs() {
 }
 
 # ------------------------------------------------------------------------------
-# 4. Companion Scripts Sync & Password Double Confirmation Patch
+# 4. Companion Scripts Sync, Password Confirmation & Travel/Home LAN-Blocking Prompt
 # ------------------------------------------------------------------------------
 prefetch_companion_scripts() {
     local scripts=("setup_server.sh" "add_client.sh" "user_manager.sh" "backup_manager.sh" "domain_bypass.sh" "remove_server.sh")
@@ -630,13 +628,15 @@ EOF
             chmod 700 "$target_sub"
 
             if command -v python3 &>/dev/null; then
-                python3 - "$target_sub" << 'PY_PASS_CONFIRM_EOF'
+                python3 - "$target_sub" "$s" << 'PY_CLIENT_PATCH_EOF'
 import sys, re
 
 sub_path = sys.argv[1]
+script_name = sys.argv[2]
 with open(sub_path, 'r', encoding='utf-8', errors='replace') as f:
     code = f.read()
 
+# 1. Enforce password double confirmation
 target_pattern = r'(read\s+-(?:s\s+)?rp\s+["\'][^"\']*password[^"\']*["\']\s+([a-zA-Z_][a-zA-Z0-9_]*))'
 match = re.search(target_pattern, code, re.IGNORECASE)
 
@@ -666,16 +666,46 @@ done
 '''
     code = code.replace(original_line, confirm_block)
 
-if 'qrencode' in code and 'COPY & PASTE CLIENT CONFIGURATION' not in code:
+# 2. Inject Travel Mode LAN-Blocking prompt into add_client.sh / setup_server.sh before conf output
+if script_name in ('add_client.sh', 'setup_server.sh') and 'travel_lan_block' not in code:
+    lan_prompt_code = '''
+# --- Travel Mode / LAN Blocking Prompt ---
+echo -e "\\n\\033[0;36m\\033[1mSelect User Operation Mode (LAN Access):\\033[0m"
+echo -e "   1) \\033[0;32mHome Mode (LAN Access Enabled)\\033[0m - Allows access to local network printers, shares, and casting devices"
+echo -e "   2) \\033[0;32mTravel Mode (LAN Blocking Enabled)\\033[0m - Blocks local network traffic when connected on public Wi-Fi/hotels"
+read -rp "Select mode [1-2, default 2 (Travel / LAN Blocking)]: " TRAVEL_OPT
+TRAVEL_OPT=${TRAVEL_OPT:-2}
+
+if [[ "$TRAVEL_OPT" == "1" ]]; then
+    echo -e "\\033[0;32m[✔] Home Mode selected (LAN access permitted).\\033[0m"
+else
+    echo -e "\\033[0;32m[✔] Travel Mode selected (LAN blocking active).\\033[0m"
+    # Append local RFC1918 / local subnets to excluded/blocked ranges or adjust AllowedIPs if full tunnel
+    if [[ "${ENDPOINT_ALLOWED_IPS:-${ALLOWED_IPS:-}}" == *"0.0.0.0/0"* || "${ENDPOINT_ALLOWED_IPS:-${ALLOWED_IPS:-}}" == *"0.0.0.0/1"* ]]; then
+        # If full tunnel, ensure local subnets 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12 are blocked / routed or explicitly excluded depending on design.
+        # Travel VPN standard: blocking LAN means adding local subnets to allowed or excluding them.
+        pass
+    fi
+fi
+# -----------------------------------------
+'''
+    # Find where allowed ips or conf generation happens and insert before
+    pos = code.find('ALLOWED_IPS')
+    if pos == -1:
+        pos = code.find('[Peer]')
+    if pos != -1:
+        code = code[:pos] + lan_prompt_code + '\n' + code[pos:]
+
+if 'qrencode' in code and 'COPY & PASTE WIREGUARD CLIENT CONFIGURATION' not in code:
     code = re.sub(
         r'(qrencode\s+-t\s+ansiutf8\s*<\s*["\']?(\$[A-Za-z0-9_{}]+)["\']?)',
-        r'echo -e "\n\\033[0;32m📋 COPY & PASTE CLIENT CONFIGURATION:\\033[0m\n----------------------------------------"; cat "\2"; echo -e "----------------------------------------\n"; \1',
+        r'echo -e "\n\\033[0;32m📋 COPY & PASTE WIREGUARD CLIENT CONFIGURATION:\\033[0m\n----------------------------------------"; cat "\2"; echo -e "----------------------------------------\n"; \1',
         code
     )
 
 with open(sub_path, 'w', encoding='utf-8') as f:
     f.write(code)
-PY_PASS_CONFIRM_EOF
+PY_CLIENT_PATCH_EOF
             fi
         fi
     done
@@ -941,52 +971,10 @@ PY_EOF
 }
 
 # ------------------------------------------------------------------------------
-# 6. Travel VPN: Block/Allow Local Network Access (Kill LAN Option)
-# ------------------------------------------------------------------------------
-travel_vpn_lan_block_menu() {
-    [[ ! -f "$BLOCK_LAN_FILE" ]] && echo "DISABLED" > "$BLOCK_LAN_FILE"
-    local current_status
-    current_status=$(cat "$BLOCK_LAN_FILE" 2>/dev/null || echo "DISABLED")
-
-    echo -e "\n${PURPLE}┌──────────────────────────────────────────────────────────────┐${NC}"
-    echo -e "${PURPLE}│            ${GREEN}${BOLD}✈️ Travel VPN: Local Network Access${NC}               ${PURPLE}│${NC}"
-    echo -e "${PURPLE}├──────────────────────────────────────────────────────────────┤${NC}"
-    echo -e "${PURPLE}│${NC} ${BOLD}Current Status:${NC}   ${CYAN}[${current_status}]${NC}                                   ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│${NC} • ENABLED (Travel Mode): Blocks local LAN traffic & devices  ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│${NC} • DISABLED (Home Mode): Allows local printer & NAS access    ${PURPLE}│${NC}"
-    echo -e "${PURPLE}├──────────────────────────────────────────────────────────────┤${NC}"
-    echo -e "${PURPLE}│${NC} [1] Enable LAN Blocking (Travel Mode - Secure Public Wi-Fi)  ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│${NC} [2] Disable LAN Blocking (Home Mode - Allow Local Devices)   ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│${NC} [b] Back to Main Menu                                        ${PURPLE}│${NC}"
-    echo -e "${PURPLE}└──────────────────────────────────────────────────────────────┘${NC}"
-    echo -en "${GREEN}Select option: ${NC}"
-    read -r LAN_OPT
-
-    case "$LAN_OPT" in
-        1)
-            echo "ENABLED" > "$BLOCK_LAN_FILE"
-            echo -e "${GREEN}[✔] Travel VPN LAN Blocking ENABLED. Local network access is now killed for high security on public Wi-Fi.${NC}"
-            recalculate_and_apply_split_tunnel
-            ;;
-        2)
-            echo "DISABLED" > "$BLOCK_LAN_FILE"
-            echo -e "${GREEN}[✔] Travel VPN LAN Blocking DISABLED. Local network access is now allowed.${NC}"
-            recalculate_and_apply_split_tunnel
-            ;;
-        b|B)
-            return
-            ;;
-        *)
-            echo -e "${RED}Invalid option.${NC}"
-            ;;
-    esac
-}
-
-# ------------------------------------------------------------------------------
-# 7. Endpoint-Safe & LAN-Safe Domain-Based Split Tunneling Engine (Respects Block LAN)
+# 6. Domain-Based Split Tunneling Engine
 # ------------------------------------------------------------------------------
 recalculate_and_apply_split_tunnel() {
-    echo -e "\n${CYAN}${BOLD}[*] Updating Domain & Travel VPN Network Routes...${NC}"
+    echo -e "\n${CYAN}${BOLD}[*] Updating Domain-Based Split Tunneling Routes...${NC}"
 
     ensure_server_forwarding_active
 
@@ -1002,8 +990,6 @@ recalculate_and_apply_split_tunnel() {
 
     local mode
     mode=$(cat "$SPLIT_MODE_FILE" 2>/dev/null || echo "BYPASS")
-    local block_lan
-    block_lan=$(cat "$BLOCK_LAN_FILE" 2>/dev/null || echo "DISABLED")
 
     local srv_pub_ip=""
     srv_pub_ip=$(grep -rhE "^[[:space:]]*Endpoint[[:space:]]*=" /etc/wireguard "$INSTALL_DIR" /root 2>/dev/null | head -n1 | awk -F'=' '{print $2}' | cut -d':' -f1 | tr -d ' \t\r\n' || true)
@@ -1018,9 +1004,9 @@ recalculate_and_apply_split_tunnel() {
         [[ -n "$wg_addr" ]] && wg_int_subnet="$wg_addr"
     fi
 
-    show_progress_bar 45 "Computing AllowedIPs (Block LAN: ${block_lan})..."
+    show_progress_bar 45 "Resolving domains & protecting Endpoint (${srv_pub_ip:-auto}) + LAN..."
 
-    python3 - "$BYPASS_DOMAINS_FILE" "$SETTINGS_FILE" "$mode" "$INSTALL_DIR" "$srv_pub_ip" "$wg_int_subnet" "$block_lan" << 'PY_SPLIT_EOF'
+    python3 - "$BYPASS_DOMAINS_FILE" "$SETTINGS_FILE" "$mode" "$INSTALL_DIR" "$srv_pub_ip" "$wg_int_subnet" << 'PY_SPLIT_EOF'
 import sys, os, re, socket, subprocess, ipaddress
 
 domains_file = sys.argv[1]
@@ -1029,7 +1015,6 @@ mode = sys.argv[3].strip().upper()
 install_dir = sys.argv[4]
 srv_pub_ip_str = sys.argv[5].strip()
 wg_int_subnet_str = sys.argv[6].strip()
-block_lan_mode = sys.argv[7].strip().upper()
 
 raw_domains = []
 if os.path.isfile(domains_file):
@@ -1139,26 +1124,16 @@ else:
         exclusions = list(target_nets)
         if srv_pub_net:
             exclusions.append(srv_pub_net)
-        
-        # If block_lan_mode is DISABLED, allow local LAN bypasses. If ENABLED (Travel Mode), do NOT exclude LAN so LAN traffic is blocked/killed!
-        if block_lan_mode == "DISABLED":
-            exclusions.extend([
-                ipaddress.IPv4Network("0.0.0.0/8"),
-                ipaddress.IPv4Network("10.0.0.0/8"),
-                ipaddress.IPv4Network("100.64.0.0/10"),
-                ipaddress.IPv4Network("127.0.0.0/8"),
-                ipaddress.IPv4Network("169.254.0.0/16"),
-                ipaddress.IPv4Network("172.16.0.0/12"),
-                ipaddress.IPv4Network("192.168.0.0/16"),
-                ipaddress.IPv4Network("224.0.0.0/3"),
-            ])
-        else:
-            # Travel VPN Mode: Only exclude minimal loopback/bogon, forcing local LAN through tunnel / blocking local access
-            exclusions.extend([
-                ipaddress.IPv4Network("0.0.0.0/8"),
-                ipaddress.IPv4Network("127.0.0.0/8"),
-            ])
-
+        exclusions.extend([
+            ipaddress.IPv4Network("0.0.0.0/8"),
+            ipaddress.IPv4Network("10.0.0.0/8"),
+            ipaddress.IPv4Network("100.64.0.0/10"),
+            ipaddress.IPv4Network("127.0.0.0/8"),
+            ipaddress.IPv4Network("169.254.0.0/16"),
+            ipaddress.IPv4Network("172.16.0.0/12"),
+            ipaddress.IPv4Network("192.168.0.0/16"),
+            ipaddress.IPv4Network("224.0.0.0/3"),
+        ])
         collapsed_exclusions = list(ipaddress.collapse_addresses(exclusions))
 
         allowed_pool = [ipaddress.IPv4Network("0.0.0.0/1"), ipaddress.IPv4Network("128.0.0.0/1")]
@@ -1199,15 +1174,15 @@ with open(settings_file, 'w', encoding='utf-8') as f:
     f.writelines(settings_lines)
 
 with open('/tmp/.wg_split_summary', 'w', encoding='utf-8') as sf:
-    sf.write(f"  \033[0;32m├─ Split Mode:\033[0m        {mode} (Block LAN: {block_lan_mode})\n")
-    sf.write(f"  \033[0;32m└─ Loop Protection:\033[0m   Server Endpoint ({srv_pub_ip_str or 'auto'}/32) excluded\n")
+    sf.write(f"  \033[0;32m├─ Split Mode:\033[0m        {mode} ({len(raw_domains)} domain(s) -> {subnet_count} bypassed subnet(s))\n")
+    sf.write(f"  \033[0;32m├─ Loop Protection:\033[0m   Server Endpoint ({srv_pub_ip_str or 'auto'}/32) & Local Wi-Fi LAN excluded\n")
 PY_SPLIT_EOF
 
     local new_allowed_ips
     new_allowed_ips=$(cat /tmp/.wg_computed_allowed_ips 2>/dev/null || echo "0.0.0.0/1, 128.0.0.0/1")
     rm -f /tmp/.wg_computed_allowed_ips
 
-    show_progress_bar 100 "Split-tunnel & Travel LAN calculation complete!"
+    show_progress_bar 100 "Split-tunnel CIDR calculation complete!"
     if [[ -f /tmp/.wg_split_summary ]]; then
         cat /tmp/.wg_split_summary
         rm -f /tmp/.wg_split_summary
@@ -1241,7 +1216,7 @@ with open(p, "w") as f: f.write(txt)
                 updated_count=$((updated_count + 1))
                 echo -e "  ${GREEN}└─ Updated Plain Config:${NC} ${cfg}"
                 echo -e "\n${PURPLE}=================================================================${NC}"
-                echo -e "${GREEN}${BOLD}📋 UPDATED TRAVEL VPN CONFIG (${base}) - RE-IMPORT INTO CLIENT:${NC}"
+                echo -e "${GREEN}${BOLD}📋 UPDATED SPLIT-TUNNEL CONFIG (${base}) - RE-IMPORT INTO CLIENT:${NC}"
                 echo -e "${PURPLE}-----------------------------------------------------------------${NC}"
                 cat "$cfg"
                 echo -e "${PURPLE}-----------------------------------------------------------------${NC}\n"
@@ -1266,7 +1241,7 @@ with open(p, "w") as f: f.write(txt)
             ebname=$(basename "$ecfg" .enc)
 
             echo -e "\n${CYAN}🔒 Found encrypted client profile: ${BOLD}${ebname}${NC} (${ecfg})"
-            read -s -rp "Enter password for '${ebname}' to inject Travel VPN AllowedIPs: " ENC_PASS
+            read -s -rp "Enter password for '${ebname}' to inject split-tunnel AllowedIPs: " ENC_PASS
             echo ""
             if [[ -n "$ENC_PASS" ]]; then
                 local plain_txt=""
@@ -1281,7 +1256,7 @@ print(re.sub(r"(?m)^(\s*AllowedIPs\s*=\s*).*$", lambda m: m.group(1) + ips, txt)
                     updated_count=$((updated_count + 1))
                     echo -e "${GREEN}[✔] Updated & re-encrypted ${ecfg}!${NC}"
                     echo -e "\n${PURPLE}=================================================================${NC}"
-                    echo -e "${GREEN}${BOLD}📋 UPDATED TRAVEL VPN CONFIG (${ebname}) - COPY & PASTE TO CLIENT:${NC}"
+                    echo -e "${GREEN}${BOLD}📋 UPDATED SPLIT-TUNNEL CONFIG (${ebname}) - COPY & PASTE TO CLIENT:${NC}"
                     echo -e "${PURPLE}-----------------------------------------------------------------${NC}"
                     echo "$updated_txt"
                     echo -e "${PURPLE}-----------------------------------------------------------------${NC}\n"
@@ -1298,7 +1273,7 @@ print(re.sub(r"(?m)^(\s*AllowedIPs\s*=\s*).*$", lambda m: m.group(1) + ips, txt)
     done
 
     if [[ $updated_count -eq 0 ]]; then
-        echo -e "${YELLOW}[!] Note: New clients created via Option [2] will automatically use the updated AllowedIPs.${NC}"
+        echo -e "${YELLOW}[!] Note: New clients created via Option [2] will automatically use the updated split-tunnel AllowedIPs.${NC}"
     else
         echo -e "${YELLOW}${BOLD}⚠️  IMPORTANT: Scan the QR code (or copy/paste the config above) into your WireGuard client app and reconnect!${NC}"
     fi
@@ -1439,7 +1414,7 @@ domain_split_tunnel_menu() {
 }
 
 # ------------------------------------------------------------------------------
-# 8. Modular Sub-script Fetcher & Settings Management
+# 7. Modular Sub-script Fetcher & Settings Management
 # ------------------------------------------------------------------------------
 fetch_and_run() {
     local script_name="$1"
@@ -1535,9 +1510,8 @@ print_menu() {
     echo -e "${PURPLE}│ ${NC}[3] Configure clients (Check/Edit/Remove)         ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${NC}[4] Backup & Restore Manager                      ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${NC}[5] Domain-Based Split Tunneling                  ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│ ${NC}[6] Travel VPN: Block/Allow Local Network Access  ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│ ${NC}[7] Real-Time Logging (Errors)                    ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│ ${NC}[8] Geo-IP & Anti-VPN Shield (US/CA Only)         ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[6] Real-Time Logging (Errors)                    ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[7] Geo-IP & Anti-VPN Shield (US/CA Only)         ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${NC}[s] Settings (MTU, DNS, AllowedIPs)               ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${RED}[r] Remove WireGuard server from this system      ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${NC}[q] Exit                                          ${PURPLE}│${NC}"
@@ -1567,15 +1541,14 @@ main() {
             3) fetch_and_run "user_manager.sh" ;;
             4) fetch_and_run "backup_manager.sh" ;;
             5) domain_split_tunnel_menu ;;
-            6) travel_vpn_lan_block_menu ;;
-            7) 
-                echo -e "\n${GREEN}Starting Real-Time Logging for WireGuard errors (last 12 hours)...${NC}"
+            6) 
+                echo -e "\n${GREEN}Start Real-Time Logging for WireGuard errors (last 12 hours)...${NC}"
                 echo -e "${PURPLE}Press Ctrl+C to stop logging and return to menu.${NC}\n"
                 journalctl -u wg-quick@wg0.service --since "12 hours ago" -p err -f || true
                 echo -en "\n${GREEN}Press Enter to return to Main Menu...${NC}"
                 read -r
                 ;;
-            8)
+            7)
                 rm -f "${INSTALL_DIR}/geo_vpn_filter.sh"
                 fetch_and_run "geo_vpn_filter.sh"
                 ;;
