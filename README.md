@@ -33,6 +33,7 @@ This wrapper dynamically pulls the latest scripts from GitHub, ensuring your ser
 - **Smart IP Tracking:** Intelligently scans the server to dynamically assign IP addresses, preventing crashes from corrupted or empty lines.
 - **Unified Backup Manager:** Securely create, list, restore, and destroy server backups from a single interactive menu.
 - **Hyper-Fast Installation:** Streamlined setup without bloated package manager updates.
+- **Configure to activate kill swith** AllowedIPs = 0.0.0.0/1, 128.0.0.0/1
 
 ---
 
