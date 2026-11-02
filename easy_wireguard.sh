@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# 🍪 Cookie's Easy WireGuard Manager (1420 MTU | Auto-Forwarding & Safe Split-Tunnel)
+# 🍪 Cookie's Easy WireGuard Manager (Single-Run Cleanup & Stable Core)
 # ==============================================================================
 set -euo pipefail
 
@@ -157,7 +157,6 @@ SYSCTL_EOF
         ethtool -K "$def_nic" tx on rx on sg on tso on gso on gro on >/dev/null 2>&1 || true
     fi
 
-    # If wg0 is configured, verify its firewall & NAT rules are present
     if [[ -f /etc/wireguard/wg0.conf ]]; then
         local wg_port
         wg_port=$(grep -iE "^[[:space:]]*ListenPort[[:space:]]*=" /etc/wireguard/wg0.conf 2>/dev/null | awk -F'=' '{print $2}' | tr -d ' \t\r\n' || true)
@@ -209,10 +208,17 @@ isPortInUse() {
 }
 
 # ------------------------------------------------------------------------------
-# 2. Pre-Install Cleanup, Hijack Purge & Deep Uninstaller
+# 2. Pre-Install Cleanup, Hijack Purge & Deep Uninstaller (Guarded Single Run)
 # ------------------------------------------------------------------------------
 cleanupOldWireguard() {
     local mode="${1:-preinstall}"
+
+    # Guard against running multiple times in a single session
+    if [[ "$mode" == "preinstall" && -f /tmp/.wg_cleanup_done ]]; then
+        return 0
+    fi
+    touch /tmp/.wg_cleanup_done
+
     echo -e "\n${CYAN}${BOLD}[*] Cleaning up existing WireGuard instances, routing hijacks, ports, and cache...${NC}"
 
     show_progress_bar 15 "Scanning configs & kernel for WireGuard interfaces/ports..."
@@ -571,10 +577,10 @@ display_post_install_configs() {
                 local dec_text=""
                 if dec_text=$(decrypt_conf_file "$enc_file" "$DEC_PASS"); then
                     echo -e "\n${PURPLE}=================================================================${NC}"
-                    echo -e "${GREEN}${BOLD}📋 COPY & PASTE WIREGUARD CLIENT CONFIGURATION (${ecname}):${NC}"
-                    echo -e "${PURPLE}-----------------------------------------------------------------${NC}"
+                    echo -e "${PURPLE}║ ${GREEN}${BOLD}📋 WIREGUARD CLIENT CONFIGURATION (${ecname})${NC}${PURPLE} ║${NC}"
+                    echo -e "${PURPLE}╠════════════════════════════════════════════════════════════════════════════╣${NC}"
                     echo "$dec_text"
-                    echo -e "${PURPLE}-----------------------------------------------------------------${NC}\n"
+                    echo -e "${PURPLE}╚════════════════════════════════════════════════════════════════════════════╝${NC}\n"
                     if command -v qrencode &>/dev/null; then
                         echo -e "${CYAN}${BOLD}📱 SCAN QR CODE FOR MOBILE / TABLET CLIENT (${ecname}):${NC}\n"
                         echo "$dec_text" | qrencode -t ansiutf8 || true
@@ -678,6 +684,7 @@ PY_PASS_CONFIRM_EOF
 # 5. Safe Setup Server Patcher
 # ------------------------------------------------------------------------------
 run_setup_server() {
+    rm -f /tmp/.wg_cleanup_done
     cleanupOldWireguard "preinstall"
     prefetch_companion_scripts
 
@@ -928,13 +935,12 @@ PY_EOF
     rm -f "$port_selector_file"
     "$target_script"
 
-    # Guarantee IP forwarding, BBR, and wg0 NAT/FORWARD rules are active
     ensure_server_forwarding_active
     display_post_install_configs
 }
 
 # ------------------------------------------------------------------------------
-# 6. Endpoint-Safe & LAN-Safe Domain-Based Split Tunneling Engine
+# 6. Domain-Based Split Tunneling Engine
 # ------------------------------------------------------------------------------
 recalculate_and_apply_split_tunnel() {
     echo -e "\n${CYAN}${BOLD}[*] Updating Domain-Based Split Tunneling Routes...${NC}"
@@ -954,7 +960,6 @@ recalculate_and_apply_split_tunnel() {
     local mode
     mode=$(cat "$SPLIT_MODE_FILE" 2>/dev/null || echo "BYPASS")
 
-    # Detect Server Public IP & WireGuard Internal Subnet so they are NEVER misrouted!
     local srv_pub_ip=""
     srv_pub_ip=$(grep -rhE "^[[:space:]]*Endpoint[[:space:]]*=" /etc/wireguard "$INSTALL_DIR" /root 2>/dev/null | head -n1 | awk -F'=' '{print $2}' | cut -d':' -f1 | tr -d ' \t\r\n' || true)
     if [[ -z "$srv_pub_ip" ]]; then
@@ -1017,7 +1022,6 @@ if srv_pub_ip_str:
     except ValueError:
         srv_pub_net = None
 
-# Keep domain expansion minimal (apex + www) so CIDR list stays small and clean
 expanded_domains = set()
 for d in raw_domains:
     expanded_domains.add(d)
@@ -1046,7 +1050,6 @@ for dom in sorted(expanded_domains):
                 token = token.strip()
                 try:
                     ip_obj = ipaddress.IPv4Address(token)
-                    # Strictly ignore 0.0.0.0 sinkholes, loopback, or private IPs
                     if ip_obj.is_global and not ip_obj.is_multicast and not ip_obj.is_unspecified and not ip_obj.is_loopback and not ip_obj.is_private:
                         resolved_v4.add(ip_obj)
                 except ValueError:
@@ -1055,11 +1058,9 @@ for dom in sorted(expanded_domains):
             pass
 
 if not raw_domains:
-    # 0 domains configured -> standard full tunnel
     final_allowed_ips = "0.0.0.0/1, 128.0.0.0/1"
     subnet_count = 0
 else:
-    # Build target networks for the domains (/32 per resolved IP + /24 if safe)
     domain_nets = []
     for ip_obj in resolved_v4:
         if ip_obj in dns_ips:
@@ -1076,10 +1077,8 @@ else:
     subnet_count = len(target_nets)
 
     if mode == "ONLY_VPN":
-        # Route ONLY the target domains, WireGuard internal subnet, and DNS IPs through VPN
         include_nets = list(target_nets) + [wg_internal_net] + [ipaddress.IPv4Network(f"{d_ip}/32") for d_ip in dns_ips]
         collapsed_inc = list(ipaddress.collapse_addresses(include_nets))
-        # Ensure Server Public Endpoint IP is NEVER inside AllowedIPs (prevents tunnel routing loop!)
         if srv_pub_net:
             safe_inc = []
             for net in collapsed_inc:
@@ -1091,10 +1090,6 @@ else:
             collapsed_inc = list(ipaddress.collapse_addresses(safe_inc))
         final_allowed_ips = ", ".join(str(n) for n in collapsed_inc)
     else:
-        # BYPASS mode: Start with full IPv4 space and exclude:
-        # 1. The bypassed domain subnets
-        # 2. The WireGuard Server's Public Endpoint IP (/32) -> CRITICAL: Prevents outer UDP packet routing loop!
-        # 3. Local LAN / Wi-Fi / Loopback / Multicast / CGNAT ranges -> CRITICAL: Prevents local Wi-Fi blackholing!
         exclusions = list(target_nets)
         if srv_pub_net:
             exclusions.append(srv_pub_net)
@@ -1117,13 +1112,10 @@ else:
                 if net.overlaps(excl):
                     if excl.subnet_of(net):
                         next_pool.extend(net.address_exclude(excl))
-                    else:
-                        pass
                 else:
                     next_pool.append(net)
             allowed_pool = next_pool
 
-        # Always add back the active WireGuard internal tunnel subnet (e.g. 10.8.0.0/24) and DNS servers
         allowed_pool.append(wg_internal_net)
         for d_ip in dns_ips:
             allowed_pool.append(ipaddress.IPv4Network(f"{d_ip}/32"))
@@ -1171,7 +1163,6 @@ PY_SPLIT_EOF
         search_paths+=("/home/${SUDO_USER}")
     fi
 
-    # 1. Update plain .conf files
     local seen_real="|"
     for spath in "${search_paths[@]}"; do
         [[ ! -d "$spath" ]] && continue
@@ -1207,7 +1198,6 @@ with open(p, "w") as f: f.write(txt)
         done < <(find "$spath" -maxdepth 2 -type f -name "*.conf" -print0 2>/dev/null || true)
     done
 
-    # 2. Update encrypted .conf.enc files
     local seen_enc_real="|"
     for spath in "${search_paths[@]}"; do
         [[ ! -d "$spath" ]] && continue
