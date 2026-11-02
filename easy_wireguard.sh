@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# 🍪 Cookie's Easy WireGuard Manager (Travel Mode LAN-Blocking Edition)
+# 🍪 Cookie's Easy WireGuard Manager (Single-Run Cleanup & Stable Core)
 # ==============================================================================
 set -euo pipefail
 
@@ -490,7 +490,7 @@ deep_remove_wireguard() {
     show_progress_bar 100 "Deep removal complete! (${removed_files_count} config/system files purged)"
 
     echo -e "\n${GREEN}${BOLD}[✔] Deep removal finished! All WireGuard services, cached files, folders, and ports were removed.${NC}"
-    echo -e "${GREEN}[✔] Sensitive ports (80, 443, 22, 1935, etc.) and host services remain completely untouched.${NC}"
+    echo -e "${GREEN}${BOLD}[✔] Sensitive ports (80, 443, 22, 1935, etc.) and host services remain completely untouched.${NC}"
 }
 
 # ------------------------------------------------------------------------------
@@ -594,7 +594,7 @@ display_post_install_configs() {
 }
 
 # ------------------------------------------------------------------------------
-# 4. Companion Scripts Sync, Password Confirmation & Travel/Home LAN-Blocking Prompt
+# 4. Companion Scripts Sync & Password/Travel-Mode Patcher
 # ------------------------------------------------------------------------------
 prefetch_companion_scripts() {
     local scripts=("setup_server.sh" "add_client.sh" "user_manager.sh" "backup_manager.sh" "domain_bypass.sh" "remove_server.sh")
@@ -666,7 +666,7 @@ done
 '''
     code = code.replace(original_line, confirm_block)
 
-# 2. Inject Travel Mode LAN-Blocking prompt into add_client.sh / setup_server.sh before conf output
+# 2. Inject Travel Mode / LAN-Blocking prompt before client generation / conf output
 if script_name in ('add_client.sh', 'setup_server.sh') and 'travel_lan_block' not in code:
     lan_prompt_code = '''
 # --- Travel Mode / LAN Blocking Prompt ---
@@ -679,17 +679,14 @@ TRAVEL_OPT=${TRAVEL_OPT:-2}
 if [[ "$TRAVEL_OPT" == "1" ]]; then
     echo -e "\\033[0;32m[✔] Home Mode selected (LAN access permitted).\\033[0m"
 else
-    echo -e "\\033[0;32m[✔] Travel Mode selected (LAN blocking active).\\033[0m"
-    # Append local RFC1918 / local subnets to excluded/blocked ranges or adjust AllowedIPs if full tunnel
-    if [[ "${ENDPOINT_ALLOWED_IPS:-${ALLOWED_IPS:-}}" == *"0.0.0.0/0"* || "${ENDPOINT_ALLOWED_IPS:-${ALLOWED_IPS:-}}" == *"0.0.0.0/1"* ]]; then
-        # If full tunnel, ensure local subnets 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12 are blocked / routed or explicitly excluded depending on design.
-        # Travel VPN standard: blocking LAN means adding local subnets to allowed or excluding them.
-        pass
+    echo -e "\\033[0;32m[✔] Travel Mode selected (LAN blocking active via AllowedIPs restriction).\\033[0m"
+    # Append local RFC1918 exclusion to AllowedIPs if full tunnel so local broadcast/LAN traffic is dropped by client OS
+    if [[ -n "${ALLOWED_IPS:-}" && "${ALLOWED_IPS:-}" == *"0.0.0.0/0"* ]]; then
+        ALLOWED_IPS="0.0.0.0/5, 8.0.0.0/7, 11.0.0.0/8, 12.0.0.0/6, 16.0.0.0/4, 32.0.0.0/3, 64.0.0.0/2, 128.0.0.0/1"
     fi
 fi
 # -----------------------------------------
 '''
-    # Find where allowed ips or conf generation happens and insert before
     pos = code.find('ALLOWED_IPS')
     if pos == -1:
         pos = code.find('[Peer]')
@@ -712,7 +709,7 @@ PY_CLIENT_PATCH_EOF
 }
 
 # ------------------------------------------------------------------------------
-# 5. Safe Setup Server Patcher
+# 5. Safe Setup Server Patcher (Neutralizes redundant internal cleanup via WG_SKIP_CLEANUP=1)
 # ------------------------------------------------------------------------------
 run_setup_server() {
     rm -f /tmp/.wg_cleanup_done
@@ -894,6 +891,18 @@ content = re.sub(
     content
 )
 
+# Neutralize the internal setup_server.sh cleanup function so it never runs a second time
+content = re.sub(
+    r'(?m)^([ \t]*(?:function\s+)?cleanupOldWireguard[ \t]*\(\)[ \t]*\{)',
+    r'\1 return 0;',
+    content
+)
+content = re.sub(
+    r'(?m)^([ \t]*cleanupOldWireguard[ \t]*$)',
+    r': # cleanupOldWireguard skipped',
+    content
+)
+
 content = re.sub(
     r'PostUp\s*=\s*(/root/easy_wireguard/geo_vpn_filter\.sh\s+--apply)(?!\s*\|\|)',
     lambda m: f'PostUp = test -x /root/easy_wireguard/geo_vpn_filter.sh && {m.group(1)} || true',
@@ -964,7 +973,7 @@ PY_EOF
     fi
 
     rm -f "$port_selector_file"
-    "$target_script"
+    WG_SKIP_CLEANUP=1 "$target_script"
 
     ensure_server_forwarding_active
     display_post_install_configs
@@ -1266,7 +1275,7 @@ print(re.sub(r"(?m)^(\s*AllowedIPs\s*=\s*).*$", lambda m: m.group(1) + ips, txt)
                         echo ""
                     fi
                 else
-                    echo -e "${RED}[!] Incorrect password for ${ebname}. Could not update ${ecfg}.${NC}"
+                    echo -e "${RED}[!] Incorrect password for ${ebname}.${NC}"
                 fi
             fi
         done < <(find "$spath" -maxdepth 2 -type f -name "*.conf.enc" -print0 2>/dev/null || true)
@@ -1542,7 +1551,7 @@ main() {
             4) fetch_and_run "backup_manager.sh" ;;
             5) domain_split_tunnel_menu ;;
             6) 
-                echo -e "\n${GREEN}Start Real-Time Logging for WireGuard errors (last 12 hours)...${NC}"
+                echo -e "\n${GREEN}Starting Real-Time Logging for WireGuard errors (last 12 hours)...${NC}"
                 echo -e "${PURPLE}Press Ctrl+C to stop logging and return to menu.${NC}\n"
                 journalctl -u wg-quick@wg0.service --since "12 hours ago" -p err -f || true
                 echo -en "\n${GREEN}Press Enter to return to Main Menu...${NC}"
