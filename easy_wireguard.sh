@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# 🍪 Cookie's Easy WireGuard Manager (Clean Core 1420 MTU & Zero-Drop Edition)
+# 🍪 Cookie's Easy WireGuard Manager (Clean Core 1420 MTU & Working Split-Tunnel)
 # ==============================================================================
 set -euo pipefail
 
@@ -53,7 +53,7 @@ if [[ -f "$SETTINGS_FILE" ]]; then
 fi
 
 # ------------------------------------------------------------------------------
-# Helper Functions: Progress Bar, Clear Stripping & Bounded IPTables
+# Helper Functions: Progress Bar, Clear Stripping & OpenSSL Config Encryption
 # ------------------------------------------------------------------------------
 show_progress_bar() {
     local percent="$1"
@@ -90,6 +90,33 @@ safe_ipt_del() {
         fi
         tries=$((tries + 1))
     done
+}
+
+# Decrypts .conf.enc supporting both 100k-iter PBKDF2 and default PBKDF2
+decrypt_conf_file() {
+    local enc_file="$1"
+    local pass="$2"
+    local out=""
+    out=$(openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 -pass "pass:${pass}" -in "$enc_file" 2>/dev/null || true)
+    if [[ "$out" == *"[Interface]"* ]]; then
+        echo "$out"
+        return 0
+    fi
+    out=$(openssl enc -d -aes-256-cbc -pbkdf2 -pass "pass:${pass}" -in "$enc_file" 2>/dev/null || true)
+    if [[ "$out" == *"[Interface]"* ]]; then
+        echo "$out"
+        return 0
+    fi
+    return 1
+}
+
+encrypt_conf_file() {
+    local content="$1"
+    local enc_file="$2"
+    local pass="$3"
+    echo -n "$content" | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -pass "pass:${pass}" -out "$enc_file" 2>/dev/null || \
+    echo -n "$content" | openssl enc -aes-256-cbc -salt -pbkdf2 -pass "pass:${pass}" -out "$enc_file" 2>/dev/null
+    chmod 600 "$enc_file" 2>/dev/null || true
 }
 
 # ------------------------------------------------------------------------------
@@ -209,11 +236,9 @@ cleanupOldWireguard() {
     timeout 5 systemctl stop warp-svc cbwireguard-web >/dev/null 2>&1 || true
     timeout 5 systemctl disable warp-svc cbwireguard-web >/dev/null 2>&1 || true
 
-    # Remove policy routing hijack (0x51820 -> table 51820) from easy_wireguard_new.sh
     while ip rule del fwmark 0x51820 table 51820 2>/dev/null; do :; done
     ip route flush table 51820 2>/dev/null || true
 
-    # Remove dnsmasq port 53 stub hijacks from easy_wireguard_new.sh
     if [[ -f /etc/dnsmasq.d/00-stealth-privacy.conf || -f /etc/dnsmasq.d/wg_split.conf ]]; then
         rm -f /etc/dnsmasq.d/00-stealth-privacy.conf /etc/dnsmasq.d/wg_split.conf /etc/dnsmasq.d/00-wg-location-stealth.conf 2>/dev/null || true
         timeout 5 systemctl restart dnsmasq >/dev/null 2>&1 || true
@@ -284,7 +309,6 @@ cleanupOldWireguard() {
         ethtool -K "$def_nic" tx on rx on sg on tso on gso on gro on >/dev/null 2>&1 || true
     fi
 
-    # Flush mangle chains completely so no leftover TTL=128 or fwmark 0x51820 rules survive
     iptables -t mangle -F PREROUTING 2>/dev/null || true
     iptables -t mangle -F FORWARD 2>/dev/null || true
     iptables -t mangle -F POSTROUTING 2>/dev/null || true
@@ -409,10 +433,11 @@ deep_remove_wireguard() {
 }
 
 # ------------------------------------------------------------------------------
-# 3. Post-Install Configs Display: Guaranteed Raw .conf AND QR Code
+# 3. Post-Install & Split-Tunnel Config Display (Supports Plain .conf & .conf.enc)
 # ------------------------------------------------------------------------------
 display_post_install_configs() {
-    local found_configs=()
+    local found_plain=()
+    local found_enc=()
     local search_paths=("/etc/wireguard/clients" "$INSTALL_DIR" "/root" "/etc/wireguard")
     if [[ -n "${SUDO_USER:-}" && -d "/home/${SUDO_USER}" ]]; then
         search_paths+=("/home/${SUDO_USER}")
@@ -425,57 +450,85 @@ display_post_install_configs() {
             base=$(basename "$cfg")
             [[ "$base" == "wg0.conf" || "$base" == "wg1.conf" || "$base" == "settings.conf" || "$base" == "resolv.conf" || "$base" == "sysctl.conf" ]] && continue
             if grep -q "\[Interface\]" "$cfg" 2>/dev/null && grep -q "Endpoint" "$cfg" 2>/dev/null; then
-                found_configs+=("$cfg")
+                found_plain+=("$cfg")
             fi
         done < <(find "$spath" -maxdepth 2 -type f -name "*.conf" -print0 2>/dev/null || true)
+
+        while IFS= read -r -d '' ecfg; do
+            found_enc+=("$ecfg")
+        done < <(find "$spath" -maxdepth 2 -type f -name "*.conf.enc" -print0 2>/dev/null || true)
     done
 
-    local unique_configs=()
+    local unique_plain=()
     local seen_names="|"
-    for c in "${found_configs[@]}"; do
+    for c in "${found_plain[@]}"; do
         local bname
         bname=$(basename "$c")
         if [[ "$seen_names" != *"|${bname}|"* ]]; then
             seen_names+="${bname}|"
-            unique_configs+=("$c")
+            unique_plain+=("$c")
         fi
     done
 
-    if [[ ${#unique_configs[@]} -eq 0 ]]; then
+    local unique_enc=()
+    local seen_enc="|"
+    for ec in "${found_enc[@]}"; do
+        local ebname
+        ebname=$(basename "$ec")
+        if [[ "$seen_enc" != *"|${ebname}|"* ]]; then
+            seen_enc+="${ebname}|"
+            unique_enc+=("$ec")
+        fi
+    done
+
+    if [[ ${#unique_plain[@]} -eq 0 && ${#unique_enc[@]} -eq 0 ]]; then
         echo -e "\n${CYAN}[*] Generating initial client configuration...${NC}"
         fetch_and_run "add_client.sh"
-        for spath in "${search_paths[@]}"; do
-            [[ ! -d "$spath" ]] && continue
-            while IFS= read -r -d '' cfg; do
-                local base
-                base=$(basename "$cfg")
-                [[ "$base" == "wg0.conf" || "$base" == "wg1.conf" || "$base" == "settings.conf" ]] && continue
-                if grep -q "\[Interface\]" "$cfg" 2>/dev/null && grep -q "Endpoint" "$cfg" 2>/dev/null; then
-                    if [[ "$seen_names" != *"|${base}|"* ]]; then
-                        seen_names+="${base}|"
-                        unique_configs+=("$cfg")
-                    fi
-                fi
-            done < <(find "$spath" -maxdepth 2 -type f -name "*.conf" -print0 2>/dev/null || true)
-        done
+        return 0
     fi
 
-    if [[ ${#unique_configs[@]} -gt 0 ]]; then
-        for cfg_file in "${unique_configs[@]}"; do
-            local cname
-            cname=$(basename "$cfg_file")
+    # Print any plain .conf files
+    for cfg_file in "${unique_plain[@]}"; do
+        local cname
+        cname=$(basename "$cfg_file")
+        echo -e "\n${PURPLE}╔════════════════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${PURPLE}║ ${GREEN}${BOLD}📋 WIREGUARD CLIENT CONFIGURATION (${cname})${NC}${PURPLE} ║${NC}"
+        echo -e "${PURPLE}║ ${YELLOW}Path: ${cfg_file}${NC}${PURPLE} ║${NC}"
+        echo -e "${PURPLE}╠════════════════════════════════════════════════════════════════════════════╣${NC}"
+        cat "$cfg_file"
+        echo -e "${PURPLE}╚════════════════════════════════════════════════════════════════════════════╝${NC}\n"
 
-            echo -e "\n${PURPLE}╔════════════════════════════════════════════════════════════════════════════╗${NC}"
-            echo -e "${PURPLE}║ ${GREEN}${BOLD}📋 WIREGUARD CLIENT CONFIGURATION (${cname})${NC}${PURPLE} ║${NC}"
-            echo -e "${PURPLE}║ ${YELLOW}Path: ${cfg_file}${NC}${PURPLE} ║${NC}"
-            echo -e "${PURPLE}╠════════════════════════════════════════════════════════════════════════════╣${NC}"
-            cat "$cfg_file"
-            echo -e "${PURPLE}╚════════════════════════════════════════════════════════════════════════════╝${NC}\n"
+        if command -v qrencode &>/dev/null; then
+            echo -e "${CYAN}${BOLD}📱 SCAN QR CODE FOR MOBILE / TABLET CLIENT (${cname}):${NC}\n"
+            qrencode -t ansiutf8 < "$cfg_file" || true
+            echo ""
+        fi
+    done
 
-            if command -v qrencode &>/dev/null; then
-                echo -e "${CYAN}${BOLD}📱 SCAN QR CODE FOR MOBILE / TABLET CLIENT (${cname}):${NC}\n"
-                qrencode -t ansiutf8 < "$cfg_file" || true
-                echo ""
+    # If configs are encrypted (.conf.enc) and no plain .conf exists, decrypt and display
+    if [[ ${#unique_plain[@]} -eq 0 && ${#unique_enc[@]} -gt 0 ]]; then
+        for enc_file in "${unique_enc[@]}"; do
+            local ecname
+            ecname=$(basename "$enc_file" .enc)
+            echo -e "\n${CYAN}🔒 Encrypted client configuration detected: ${BOLD}${ecname}${NC}"
+            read -s -rp "Enter decryption password for ${ecname} to display config & QR (or press Enter to skip): " DEC_PASS
+            echo ""
+            if [[ -n "$DEC_PASS" ]]; then
+                local dec_text=""
+                if dec_text=$(decrypt_conf_file "$enc_file" "$DEC_PASS"); then
+                    echo -e "\n${PURPLE}╔════════════════════════════════════════════════════════════════════════════╗${NC}"
+                    echo -e "${PURPLE}║ ${GREEN}${BOLD}📋 WIREGUARD CLIENT CONFIGURATION (${ecname})${NC}${PURPLE} ║${NC}"
+                    echo -e "${PURPLE}╠════════════════════════════════════════════════════════════════════════════╣${NC}"
+                    echo "$dec_text"
+                    echo -e "${PURPLE}╚════════════════════════════════════════════════════════════════════════════╝${NC}\n"
+                    if command -v qrencode &>/dev/null; then
+                        echo -e "${CYAN}${BOLD}📱 SCAN QR CODE FOR MOBILE / TABLET CLIENT (${ecname}):${NC}\n"
+                        echo "$dec_text" | qrencode -t ansiutf8 || true
+                        echo ""
+                    fi
+                else
+                    echo -e "${RED}[!] Incorrect password for ${ecname}.${NC}"
+                fi
             fi
         done
     fi
@@ -483,8 +536,6 @@ display_post_install_configs() {
 
 # ------------------------------------------------------------------------------
 # 4. Companion Scripts Sync & Password Double Confirmation Patch
-#    Note: geo_vpn_filter.sh is kept as a safe pass-through stub during install
-#    so PostUp never blocks traffic unless Option [7] is explicitly used!
 # ------------------------------------------------------------------------------
 prefetch_companion_scripts() {
     local scripts=("setup_server.sh" "add_client.sh" "user_manager.sh" "backup_manager.sh" "domain_bypass.sh" "remove_server.sh")
@@ -495,7 +546,6 @@ prefetch_companion_scripts() {
     mkdir -p "$INSTALL_DIR"
     chmod 700 "$INSTALL_DIR"
 
-    # Keep geo_vpn_filter.sh as a pass-through stub during initial setup
     cat << 'EOF' > "${INSTALL_DIR}/geo_vpn_filter.sh"
 #!/bin/bash
 exit 0
@@ -554,8 +604,17 @@ done
 # --------------------------------------------
 '''
     code = code.replace(original_line, confirm_block)
-    with open(sub_path, 'w', encoding='utf-8') as f:
-        f.write(code)
+
+# Also ensure add_client.sh prints the raw .conf before encrypting/deleting it
+if 'qrencode' in code and 'WIREGUARD CLIENT CONFIGURATION' not in code:
+    code = re.sub(
+        r'(qrencode\s+-t\s+ansiutf8\s*<\s*["\']?(\$[A-Za-z0-9_{}]+)["\']?)',
+        r'echo -e "\n\\033[0;32m📋 COPY & PASTE CLIENT CONFIGURATION:\\033[0m\n----------------------------------------"; cat "\2"; echo -e "----------------------------------------\n"; \1',
+        code
+    )
+
+with open(sub_path, 'w', encoding='utf-8') as f:
+    f.write(code)
 PY_PASS_CONFIRM_EOF
             fi
         fi
@@ -563,7 +622,7 @@ PY_PASS_CONFIRM_EOF
 }
 
 # ------------------------------------------------------------------------------
-# 5. Safe Setup Server Patcher (Avoids Port 4500 ALG Drops & Keeps Core Untouched)
+# 5. Safe Setup Server Patcher
 # ------------------------------------------------------------------------------
 run_setup_server() {
     cleanupOldWireguard "preinstall"
@@ -610,7 +669,7 @@ select_safe_wg_port() {
     echo -e "   2) \033[0;32m1194\033[0m  (OpenVPN Standard UDP | High ISP Compatibility)"
     echo -e "   3) \033[0;32m41194\033[0m (High Tunnel UDP | Evades Low-Port Scans)"
     echo -e "   4) \033[0;32m3478\033[0m  (STUN / WebRTC Media UDP)"
-    echo -e "   5) \033[0;32m4500\033[0m  (IPsec NAT-T UDP - Note: Some routers apply IPsec ALG inspection)"
+    echo -e "   5) \033[0;32m4500\033[0m  (IPsec NAT-T UDP)"
     echo -e "   6) \033[0;32m853\033[0m   (DNS-over-QUIC UDP)"
     echo -e "   7) Random High Port (49152-65535)"
     echo -e "   8) Custom Port (Or type any port directly, e.g. 8008)"
@@ -820,7 +879,7 @@ PY_EOF
 }
 
 # ------------------------------------------------------------------------------
-# 6. Domain-Based Split Tunneling Engine
+# 6. Domain-Based Split Tunneling Engine (Supports Plain .conf & Encrypted .conf.enc)
 # ------------------------------------------------------------------------------
 recalculate_and_apply_split_tunnel() {
     echo -e "\n${CYAN}${BOLD}[*] Updating Domain-Based Split Tunneling Routes...${NC}"
@@ -838,7 +897,7 @@ recalculate_and_apply_split_tunnel() {
     local mode
     mode=$(cat "$SPLIT_MODE_FILE" 2>/dev/null || echo "BYPASS")
 
-    show_progress_bar 45 "Resolving domain A records across multiple DNS resolvers..."
+    show_progress_bar 45 "Resolving domain A records across multiple global DNS resolvers..."
 
     python3 - "$BYPASS_DOMAINS_FILE" "$SETTINGS_FILE" "$mode" "$INSTALL_DIR" << 'PY_SPLIT_EOF'
 import sys, os, re, socket, subprocess, ipaddress
@@ -879,7 +938,7 @@ for d in raw_domains:
     if not d.startswith('www.'):
         expanded_domains.add('www.' + d)
     if 'netflix.com' in d:
-        expanded_domains.update(['nflxext.com', 'nflxso.net', 'nflxvideo.net', 'nflximg.net'])
+        expanded_domains.update(['nflxext.com', 'nflxso.net', 'nflxvideo.net', 'nflximg.net', 'fast.com'])
     elif 'amazon.com' in d:
         expanded_domains.update(['completion.amazon.com', 'images-amazon.com', 'media-amazon.com', 'ssl-images-amazon.com'])
     elif 'paypal.com' in d:
@@ -888,6 +947,8 @@ for d in raw_domains:
         expanded_domains.update(['openai.com', 'chatgpt.com', 'oaistatic.com', 'oaiusercontent.com'])
     elif 'linkedin.com' in d:
         expanded_domains.update(['www.linkedin.com', 'licdn.com', 'media.licdn.com', 'static.licdn.com'])
+    elif 'ipinfo.io' in d or 'icanhazip.com' in d or 'ipify.org' in d or 'whatismyip' in d:
+        expanded_domains.update(['ipinfo.io', 'icanhazip.com', 'ipv4.icanhazip.com', 'api.ipify.org', 'api64.ipify.org', 'ifconfig.me', 'checkip.amazonaws.com'])
 
 resolved_v4 = set()
 for dom in sorted(expanded_domains):
@@ -898,7 +959,7 @@ for dom in sorted(expanded_domains):
     except Exception:
         pass
 
-    for resolver in ['1.1.1.1', '8.8.8.8']:
+    for resolver in ['1.1.1.1', '8.8.8.8', '9.9.9.9', '94.140.14.14']:
         try:
             out = subprocess.check_output(
                 ['dig', '+time=2', '+tries=1', '+short', f'@{resolver}', dom, 'A'],
@@ -914,14 +975,6 @@ for dom in sorted(expanded_domains):
                     pass
         except Exception:
             pass
-
-try:
-    subprocess.run(['ipset', 'create', 'wg_split_v4', 'hash:net', 'family', 'inet'], stderr=subprocess.DEVNULL, timeout=3)
-    subprocess.run(['ipset', 'flush', 'wg_split_v4'], stderr=subprocess.DEVNULL, timeout=3)
-    for ip_obj in resolved_v4:
-        subprocess.run(['ipset', 'add', 'wg_split_v4', f'{ip_obj}/24'], stderr=subprocess.DEVNULL, timeout=2)
-except Exception:
-    pass
 
 if not raw_domains or not resolved_v4:
     final_allowed_ips = "0.0.0.0/1, 128.0.0.0/1"
@@ -957,6 +1010,10 @@ else:
         collapsed_pool = list(ipaddress.collapse_addresses(allowed_pool))
         final_allowed_ips = ", ".join(str(n) for n in collapsed_pool)
 
+# Save computed AllowedIPs to /tmp/.wg_computed_allowed_ips for bash updater
+with open('/tmp/.wg_computed_allowed_ips', 'w', encoding='utf-8') as af:
+    af.write(final_allowed_ips)
+
 settings_lines = []
 found_key = False
 if os.path.isfile(settings_file):
@@ -973,47 +1030,111 @@ if not found_key:
 with open(settings_file, 'w', encoding='utf-8') as f:
     f.writelines(settings_lines)
 
-search_dirs = ['/etc/wireguard/clients', install_dir, '/root', '/etc/wireguard']
-updated_files = []
-seen_realpaths = set()
-
-for sdir in search_dirs:
-    if not os.path.isdir(sdir):
-        continue
-    for fname in os.listdir(sdir):
-        if not fname.endswith('.conf') or fname in ('wg0.conf', 'wg1.conf', 'settings.conf', 'resolv.conf', 'sysctl.conf'):
-            continue
-        fpath = os.path.join(sdir, fname)
-        if not os.path.isfile(fpath):
-            continue
-        rpath = os.path.realpath(fpath)
-        if rpath in seen_realpaths:
-            continue
-        try:
-            with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
-                c_text = f.read()
-            if '[Interface]' in c_text and '[Peer]' in c_text and 'Endpoint' in c_text:
-                new_text = re.sub(
-                    r'(?m)^(\s*AllowedIPs\s*=\s*).*$',
-                    lambda m: m.group(1) + final_allowed_ips,
-                    c_text
-                )
-                with open(fpath, 'w', encoding='utf-8') as f:
-                    f.write(new_text)
-                seen_realpaths.add(rpath)
-                updated_files.append(fpath)
-        except Exception:
-            pass
-
 with open('/tmp/.wg_split_summary', 'w', encoding='utf-8') as sf:
     sf.write(f"  \033[0;32m├─ Split Mode:\033[0m        {mode} ({len(raw_domains)} base domain(s) -> {subnet_count} CIDR block(s))\n")
-    sf.write(f"  \033[0;32m└─ Client Configs:\033[0m    Updated {len(updated_files)} client .conf file(s) & {settings_file}\n")
 PY_SPLIT_EOF
 
-    show_progress_bar 100 "Split-tunnel CIDR calculation & client config update complete!"
+    local new_allowed_ips
+    new_allowed_ips=$(cat /tmp/.wg_computed_allowed_ips 2>/dev/null || echo "0.0.0.0/1, 128.0.0.0/1")
+    rm -f /tmp/.wg_computed_allowed_ips
+
+    show_progress_bar 100 "Split-tunnel CIDR calculation complete!"
     if [[ -f /tmp/.wg_split_summary ]]; then
         cat /tmp/.wg_split_summary
         rm -f /tmp/.wg_split_summary
+    fi
+
+    # Update all plain .conf AND encrypted .conf.enc files and display updated config + QR code
+    local updated_count=0
+    local search_paths=("/etc/wireguard/clients" "$INSTALL_DIR" "/root" "/etc/wireguard")
+    if [[ -n "${SUDO_USER:-}" && -d "/home/${SUDO_USER}" ]]; then
+        search_paths+=("/home/${SUDO_USER}")
+    fi
+
+    # 1. Update plain .conf files
+    local seen_real="|"
+    for spath in "${search_paths[@]}"; do
+        [[ ! -d "$spath" ]] && continue
+        while IFS= read -r -d '' cfg; do
+            local base
+            base=$(basename "$cfg")
+            [[ "$base" == "wg0.conf" || "$base" == "wg1.conf" || "$base" == "settings.conf" || "$base" == "resolv.conf" || "$base" == "sysctl.conf" ]] && continue
+            local rpath
+            rpath=$(realpath "$cfg" 2>/dev/null || echo "$cfg")
+            [[ "$seen_real" == *"|${rpath}|"* ]] && continue
+            if grep -q "\[Interface\]" "$cfg" 2>/dev/null && grep -q "Endpoint" "$cfg" 2>/dev/null; then
+                python3 -c '
+import sys, re
+p, ips = sys.argv[1], sys.argv[2]
+with open(p, "r") as f: txt = f.read()
+txt = re.sub(r"(?m)^(\s*AllowedIPs\s*=\s*).*$", lambda m: m.group(1) + ips, txt)
+with open(p, "w") as f: f.write(txt)
+' "$cfg" "$new_allowed_ips"
+                seen_real+="${rpath}|"
+                updated_count=$((updated_count + 1))
+                echo -e "  ${GREEN}└─ Updated Plain Config:${NC} ${cfg}"
+                echo -e "\n${PURPLE}╔════════════════════════════════════════════════════════════════════════════╗${NC}"
+                echo -e "${PURPLE}║ ${GREEN}${BOLD}📋 UPDATED SPLIT-TUNNEL CONFIG (${base}) - RE-IMPORT INTO CLIENT!${NC}${PURPLE} ║${NC}"
+                echo -e "${PURPLE}╠════════════════════════════════════════════════════════════════════════════╣${NC}"
+                cat "$cfg"
+                echo -e "${PURPLE}╚════════════════════════════════════════════════════════════════════════════╝${NC}\n"
+                if command -v qrencode &>/dev/null; then
+                    echo -e "${CYAN}${BOLD}📱 SCAN UPDATED QR CODE (${base}):${NC}\n"
+                    qrencode -t ansiutf8 < "$cfg" || true
+                    echo ""
+                fi
+            fi
+        done < <(find "$spath" -maxdepth 2 -type f -name "*.conf" -print0 2>/dev/null || true)
+    done
+
+    # 2. Update encrypted .conf.enc files
+    local seen_enc_real="|"
+    for spath in "${search_paths[@]}"; do
+        [[ ! -d "$spath" ]] && continue
+        while IFS= read -r -d '' ecfg; do
+            local erpath
+            erpath=$(realpath "$ecfg" 2>/dev/null || echo "$ecfg")
+            [[ "$seen_enc_real" == *"|${erpath}|"* ]] && continue
+            seen_enc_real+="${erpath}|"
+            local ebname
+            ebname=$(basename "$ecfg" .enc)
+
+            echo -e "\n${CYAN}🔒 Found encrypted client profile: ${BOLD}${ebname}${NC} (${ecfg})"
+            read -s -rp "Enter password for '${ebname}' to inject split-tunnel AllowedIPs: " ENC_PASS
+            echo ""
+            if [[ -n "$ENC_PASS" ]]; then
+                local plain_txt=""
+                if plain_txt=$(decrypt_conf_file "$ecfg" "$ENC_PASS"); then
+                    local updated_txt
+                    updated_txt=$(python3 -c '
+import sys, re
+txt, ips = sys.stdin.read(), sys.argv[1]
+print(re.sub(r"(?m)^(\s*AllowedIPs\s*=\s*).*$", lambda m: m.group(1) + ips, txt), end="")
+' "$new_allowed_ips" <<< "$plain_txt")
+                    encrypt_conf_file "$updated_txt" "$ecfg" "$ENC_PASS"
+                    updated_count=$((updated_count + 1))
+                    echo -e "${GREEN}[✔] Updated & re-encrypted ${ecfg}!${NC}"
+                    echo -e "\n${PURPLE}╔════════════════════════════════════════════════════════════════════════════╗${NC}"
+                    echo -e "${PURPLE}║ ${GREEN}${BOLD}📋 UPDATED SPLIT-TUNNEL CONFIG (${ebname}) - COPY & PASTE TO CLIENT!${NC}${PURPLE} ║${NC}"
+                    echo -e "${PURPLE}╠════════════════════════════════════════════════════════════════════════════╣${NC}"
+                    echo "$updated_txt"
+                    echo -e "${PURPLE}╚════════════════════════════════════════════════════════════════════════════╝${NC}\n"
+                    if command -v qrencode &>/dev/null; then
+                        echo -e "${CYAN}${BOLD}📱 SCAN UPDATED QR CODE (${ebname}):${NC}\n"
+                        echo "$updated_txt" | qrencode -t ansiutf8 || true
+                        echo ""
+                    fi
+                else
+                    echo -e "${RED}[!] Incorrect password for ${ebname}. Could not update ${ecfg}.${NC}"
+                fi
+            fi
+        done < <(find "$spath" -maxdepth 2 -type f -name "*.conf.enc" -print0 2>/dev/null || true)
+    done
+
+    if [[ $updated_count -eq 0 ]]; then
+        echo -e "${YELLOW}[!] Note: New clients created via Option [2] will automatically use the updated split-tunnel AllowedIPs.${NC}"
+    else
+        echo -e "${YELLOW}${BOLD}⚠️  IMPORTANT: Copy/paste or scan the updated config above into your WireGuard client app and reconnect!${NC}"
     fi
 
     if [[ -f "$SETTINGS_FILE" ]]; then
@@ -1035,14 +1156,14 @@ domain_split_tunnel_menu() {
         echo -e "\n${PURPLE}┌──────────────────────────────────────────────────────────────┐${NC}"
         echo -e "${PURPLE}│             ${GREEN}${BOLD}🌐 Domain-Based Split Tunneling Manager${NC}          ${PURPLE}│${NC}"
         echo -e "${PURPLE}├──────────────────────────────────────────────────────────────┤${NC}"
-        echo -e "${PURPLE}│${NC} ${BOLD}Active Mode:${NC}    ${CYAN}${mode}${NC} (Updates Client AllowedIPs & IPSet)   ${PURPLE}│${NC}"
+        echo -e "${PURPLE}│${NC} ${BOLD}Active Mode:${NC}    ${CYAN}${mode}${NC} (Updates Client AllowedIPs)           ${PURPLE}│${NC}"
         echo -e "${PURPLE}│${NC} ${BOLD}Active Domains:${NC} ${YELLOW}${dom_count} domain(s) configured${NC}                    ${PURPLE}│${NC}"
         echo -e "${PURPLE}├──────────────────────────────────────────────────────────────┤${NC}"
-        echo -e "${PURPLE}│${NC} [1] Add Domain(s) (e.g. netflix.com, amazon.com, paypal.com) ${PURPLE}│${NC}"
+        echo -e "${PURPLE}│${NC} [1] Add Domain(s) (e.g. ipinfo.io, netflix.com, amazon.com)  ${PURPLE}│${NC}"
         echo -e "${PURPLE}│${NC} [2] Remove a Domain                                          ${PURPLE}│${NC}"
-        echo -e "${PURPLE}│${NC} [3] Add Preset Category (Streaming, Banking, AI, Gaming)     ${PURPLE}│${NC}"
+        echo -e "${PURPLE}│${NC} [3] Add Preset Category (Streaming, Banking, AI, IP-Check)   ${PURPLE}│${NC}"
         echo -e "${PURPLE}│${NC} [4] Toggle Mode (BYPASS VPN vs ROUTE ONLY LISTED VIA VPN)    ${PURPLE}│${NC}"
-        echo -e "${PURPLE}│${NC} [5] View Active Split Domains & Print Updated Client Config  ${PURPLE}│${NC}"
+        echo -e "${PURPLE}│${NC} [5] Re-Apply & Print Updated Client Config + QR Code         ${PURPLE}│${NC}"
         echo -e "${PURPLE}│${NC} [6] Clear All Split Domains (Reset to Full Tunnel)           ${PURPLE}│${NC}"
         echo -e "${PURPLE}│${NC} [b] Back to Main Menu                                        ${PURPLE}│${NC}"
         echo -e "${PURPLE}└──────────────────────────────────────────────────────────────┘${NC}"
@@ -1069,11 +1190,6 @@ domain_split_tunnel_menu() {
                 done
                 if [[ $added -gt 0 ]]; then
                     recalculate_and_apply_split_tunnel
-                    echo -en "\n${CYAN}Display updated client .conf and QR code now? [Y/n]: ${NC}"
-                    read -r SHOW_CFG
-                    if [[ "${SHOW_CFG:-y}" =~ ^[Yy]$ ]]; then
-                        display_post_install_configs
-                    fi
                 fi
                 ;;
             2)
@@ -1102,7 +1218,8 @@ domain_split_tunnel_menu() {
                 echo "  2) Banking & Payments (PayPal, Stripe, Chase, Bank of America, Wells Fargo)"
                 echo "  3) AI Services (ChatGPT, OpenAI, Claude, Gemini, Perplexity)"
                 echo "  4) Gaming & Social (Discord, Twitch, Steam, Epic Games, LinkedIn)"
-                echo -en "${GREEN}Select preset [1-4]: ${NC}"
+                echo "  5) IP Checkers for Testing Split-Tunnel (ipinfo.io, icanhazip.com, api.ipify.org)"
+                echo -en "${GREEN}Select preset [1-5]: ${NC}"
                 read -r PRESET_CHOICE
                 local preset_list=()
                 case "$PRESET_CHOICE" in
@@ -1110,6 +1227,7 @@ domain_split_tunnel_menu() {
                     2) preset_list=("paypal.com" "stripe.com" "chase.com" "bankofamerica.com" "wellsfargo.com" "cardinalcommerce.com") ;;
                     3) preset_list=("openai.com" "chatgpt.com" "claude.ai" "anthropic.com" "gemini.google.com" "perplexity.ai") ;;
                     4) preset_list=("discord.com" "twitch.tv" "steampowered.com" "epicgames.com" "linkedin.com") ;;
+                    5) preset_list=("ipinfo.io" "icanhazip.com" "api.ipify.org" "checkip.amazonaws.com") ;;
                     *) echo -e "${RED}Invalid preset.${NC}" ;;
                 esac
                 if [[ ${#preset_list[@]} -gt 0 ]]; then
@@ -1117,11 +1235,6 @@ domain_split_tunnel_menu() {
                         grep -q -i "^${pd}$" "$BYPASS_DOMAINS_FILE" 2>/dev/null || echo "$pd" >> "$BYPASS_DOMAINS_FILE"
                     done
                     recalculate_and_apply_split_tunnel
-                    echo -en "\n${CYAN}Display updated client .conf and QR code now? [Y/n]: ${NC}"
-                    read -r SHOW_CFG
-                    if [[ "${SHOW_CFG:-y}" =~ ^[Yy]$ ]]; then
-                        display_post_install_configs
-                    fi
                 fi
                 ;;
             4)
@@ -1141,7 +1254,7 @@ domain_split_tunnel_menu() {
                 else
                     awk '!/^(#|[[:space:]]*$)/ {printf "  %2d) %s\n", ++i, $0}' "$BYPASS_DOMAINS_FILE"
                 fi
-                display_post_install_configs
+                recalculate_and_apply_split_tunnel
                 ;;
             6)
                 > "$BYPASS_DOMAINS_FILE"
@@ -1294,7 +1407,6 @@ main() {
                 read -r
                 ;;
             7)
-                # Only download the real geo_vpn_filter.sh when explicitly requested by user
                 rm -f "${INSTALL_DIR}/geo_vpn_filter.sh"
                 fetch_and_run "geo_vpn_filter.sh"
                 ;;
