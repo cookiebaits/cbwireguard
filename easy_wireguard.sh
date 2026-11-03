@@ -1,6 +1,7 @@
 #!/bin/bash
 # ==============================================================================
-# 🍪 Cookie's Easy WireGuard Manager (Single-Run Cleanup & Stable Core)
+# 🍪 Cookie's Easy WireGuard Manager
+#    (1420 MTU | Server-Side Split Tunneling | Payment & Shopping Tuned)
 # ==============================================================================
 set -euo pipefail
 
@@ -18,6 +19,8 @@ INSTALL_DIR="/root/easy_wireguard"
 SETTINGS_FILE="${INSTALL_DIR}/settings.conf"
 BYPASS_DOMAINS_FILE="${INSTALL_DIR}/bypass_domains.txt"
 SPLIT_MODE_FILE="${INSTALL_DIR}/split_mode.txt"
+DNSMASQ_WG_CONF="/etc/dnsmasq.d/99-wg-server-split.conf"
+DNSMASQ_PORT=53530
 
 if [[ "$EUID" -ne 0 ]]; then
     echo -e "${RED}Security Error: Please run this script as root (sudo bash $0).${NC}"
@@ -119,25 +122,48 @@ encrypt_conf_file() {
 }
 
 # ------------------------------------------------------------------------------
-# Guaranteed Server Forwarding, BBR & NAT Health Check
+# 1. Server-Side Split Tunneling + Payment & Shopping Optimization Engine
 # ------------------------------------------------------------------------------
 ensure_server_forwarding_active() {
     modprobe tcp_bbr >/dev/null 2>&1 || true
+    modprobe iptable_nat >/dev/null 2>&1 || true
+    modprobe iptable_mangle >/dev/null 2>&1 || true
+    modprobe xt_mark >/dev/null 2>&1 || true
+    modprobe ipt_TTL >/dev/null 2>&1 || true
+    modprobe nf_conntrack >/dev/null 2>&1 || true
 
     local sysctl_file="/etc/sysctl.d/99-wireguard-forward.conf"
     cat << 'SYSCTL_EOF' > "$sysctl_file"
+# Core IPv4 Forwarding & Split-Route Compatibility
 net.ipv4.ip_forward = 1
 net.ipv4.conf.all.forwarding = 1
 net.ipv4.conf.all.rp_filter = 0
 net.ipv4.conf.default.rp_filter = 0
+
+# High-Speed Download/Upload Buffers & BBR Queue Discipline
 net.core.default_qdisc = fq
+net.core.rmem_max = 67108864
+net.core.wmem_max = 67108864
+net.core.rmem_default = 1048576
+net.core.wmem_default = 1048576
+net.core.optmem_max = 2048000
+net.ipv4.tcp_rmem = 4096 87380 67108864
+net.ipv4.tcp_wmem = 4096 65536 67108864
+net.ipv4.udp_rmem_min = 16384
+net.ipv4.udp_wmem_min = 16384
+net.core.netdev_max_backlog = 50000
+net.core.somaxconn = 32768
+net.ipv4.tcp_max_syn_backlog = 32768
+
+# Payment Gateway & TLS Handshake Stability
 net.ipv4.tcp_mtu_probing = 1
 net.ipv4.tcp_fastopen = 3
 net.ipv4.tcp_slow_start_after_idle = 0
-net.core.rmem_max = 33554432
-net.core.wmem_max = 33554432
-net.ipv4.tcp_rmem = 4096 87380 33554432
-net.ipv4.tcp_wmem = 4096 65536 33554432
+net.ipv4.tcp_notsent_lowat = 16384
+net.ipv4.tcp_window_scaling = 1
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_fin_timeout = 15
+net.ipv4.ip_local_port_range = 10240 65535
 SYSCTL_EOF
 
     if lsmod 2>/dev/null | grep -q bbr || grep -q bbr /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null; then
@@ -148,6 +174,9 @@ SYSCTL_EOF
     sysctl -w net.ipv4.conf.all.forwarding=1 >/dev/null 2>&1 || true
     sysctl -w net.ipv4.conf.all.rp_filter=0 >/dev/null 2>&1 || true
     sysctl -w net.ipv4.conf.default.rp_filter=0 >/dev/null 2>&1 || true
+    # Liberal TCP conntrack prevents dropped packets during 3D-Secure bank redirects
+    sysctl -w net.netfilter.nf_conntrack_tcp_be_liberal=1 >/dev/null 2>&1 || true
+    sysctl -w net.netfilter.nf_conntrack_max=262144 >/dev/null 2>&1 || true
     sysctl --system -q >/dev/null 2>&1 || sysctl -p "$sysctl_file" >/dev/null 2>&1 || true
 
     local def_nic
@@ -165,8 +194,18 @@ SYSCTL_EOF
         fi
         iptables -C FORWARD -i wg0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i wg0 -j ACCEPT 2>/dev/null || true
         iptables -C FORWARD -o wg0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 2 -o wg0 -j ACCEPT 2>/dev/null || true
-        iptables -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || \
-            iptables -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+
+        # Bidirectional TCP MSS clamping so EV TLS certs on payment gateways never fragment
+        iptables -t mangle -C FORWARD -i wg0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || \
+            iptables -t mangle -I FORWARD 1 -i wg0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+        iptables -t mangle -C FORWARD -o wg0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || \
+            iptables -t mangle -I FORWARD 2 -o wg0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+
+        # Zero-Hop TTL Preservation: Increment TTL by +1 on wg0 ingress so after Linux routing decrements by -1,
+        # the packet exits with the client's exact native OS TTL (128 for Windows, 64 for Mac/iOS/Android)
+        iptables -t mangle -C PREROUTING -i wg0 -j TTL --ttl-inc 1 2>/dev/null || \
+            iptables -t mangle -I PREROUTING 1 -i wg0 -j TTL --ttl-inc 1 2>/dev/null || true
+
         if [[ -n "$def_nic" ]]; then
             iptables -t nat -C POSTROUTING -o "$def_nic" -j MASQUERADE 2>/dev/null || \
                 iptables -t nat -I POSTROUTING 1 -o "$def_nic" -j MASQUERADE 2>/dev/null || true
@@ -174,8 +213,332 @@ SYSCTL_EOF
     fi
 }
 
+apply_server_side_split_and_payment_engine() {
+    echo -e "\n${CYAN}${BOLD}[*] Applying Server-Side Split Tunneling & Payment Gateway Optimization...${NC}"
+
+    ensure_server_forwarding_active
+
+    show_progress_bar 15 "Checking dnsmasq, ipset, and DNS utilities..."
+    for tool_pkg in "dnsmasq:dnsmasq" "ipset:ipset" "dig:dnsutils" "python3:python3"; do
+        local bin="${tool_pkg%%:*}"
+        local pkg="${tool_pkg##*:}"
+        if ! command -v "$bin" &>/dev/null && command -v apt-get &>/dev/null; then
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -o Acquire::Languages=none -qq >/dev/null 2>&1 || true
+            apt-get install -y -qq -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" "$pkg" >/dev/null 2>&1 || true
+        fi
+    done
+
+    # Create server-side ipsets for Payment Gateways & User Split-Tunnel Domains
+    if command -v ipset &>/dev/null; then
+        ipset create wg_payment_v4 hash:net family inet 2>/dev/null || true
+        ipset create wg_split_v4 hash:net family inet 2>/dev/null || true
+        ipset flush wg_split_v4 2>/dev/null || true
+    fi
+
+    # Determine wg0 internal IPv4 address dynamically
+    local wg0_ip="10.8.0.1"
+    if [[ -f /etc/wireguard/wg0.conf ]]; then
+        local cfg_ip
+        cfg_ip=$(grep -iE "^[[:space:]]*Address[[:space:]]*=" /etc/wireguard/wg0.conf 2>/dev/null | head -n1 | awk -F'=' '{print $2}' | cut -d',' -f1 | cut -d'/' -f1 | tr -d ' \t\r\n' || true)
+        [[ -n "$cfg_ip" ]] && wg0_ip="$cfg_ip"
+    fi
+    local live_wg_ip
+    live_wg_ip=$(ip -4 -o addr show dev wg0 2>/dev/null | awk '{print $4}' | cut -d'/' -f1 | head -n1 || true)
+    [[ -n "$live_wg_ip" ]] && wg0_ip="$live_wg_ip"
+
+    # Keep /etc/wireguard/split_domains.txt and bypass_domains.txt synchronized
+    mkdir -p /etc/wireguard
+    [[ ! -f "$BYPASS_DOMAINS_FILE" ]] && touch "$BYPASS_DOMAINS_FILE"
+    cp -f "$BYPASS_DOMAINS_FILE" /etc/wireguard/split_domains.txt 2>/dev/null || true
+
+    show_progress_bar 45 "Building payment & split-tunnel DNS + IPSet rules on server..."
+
+    # Test if installed dnsmasq supports ipset= and filter-AAAA directives
+    local has_dnsmasq_ipset=0
+    local has_filter_aaaa=0
+    if command -v dnsmasq &>/dev/null; then
+        if dnsmasq -v 2>/dev/null | grep -qi "ipset"; then
+            has_dnsmasq_ipset=1
+        fi
+        if dnsmasq --help 2>&1 | grep -q "filter-AAAA"; then
+            has_filter_aaaa=1
+        fi
+    fi
+
+    # Check if host has working IPv6 default route
+    local host_has_ipv6=0
+    if ip -6 route show default 2>/dev/null | grep -q "default"; then
+        host_has_ipv6=1
+    fi
+
+    python3 - "$BYPASS_DOMAINS_FILE" "$SETTINGS_FILE" "$DNSMASQ_WG_CONF" "$DNSMASQ_PORT" "$wg0_ip" "$has_dnsmasq_ipset" "$has_filter_aaaa" "$host_has_ipv6" << 'PY_SERVER_SPLIT_EOF'
+import sys, os, re, socket, subprocess, ipaddress
+
+domains_file = sys.argv[1]
+settings_file = sys.argv[2]
+dnsmasq_conf = sys.argv[3]
+dnsmasq_port = sys.argv[4]
+wg0_ip = sys.argv[5]
+has_ipset = int(sys.argv[6]) == 1
+has_filter_aaaa = int(sys.argv[7]) == 1
+host_has_ipv6 = int(sys.argv[8]) == 1
+
+# 1. Built-in Payment, 3D-Secure, Fraud-Telemetry & E-Commerce Domains
+#    (Always bypassed around AdGuard/tracker sinkholes via 1.1.1.1/8.8.8.8 & added to wg_payment_v4)
+PAYMENT_DOMAINS = [
+    # PayPal & Braintree
+    "paypal.com", "www.paypal.com", "c.paypal.com", "b.stats.paypal.com", "t.paypal.com",
+    "s.paypal.com", "m.paypal.com", "api.paypal.com", "api-m.paypal.com", "checkout.paypal.com",
+    "identity.paypal.com", "paypalobjects.com", "www.paypalobjects.com", "objects.paypal.com",
+    "c.paypalobjects.com", "paypal.me", "braintreegateway.com", "braintree-api.com",
+    "assets.braintreegateway.com", "js.braintreegateway.com",
+    # 3D-Secure 2.0 (CardinalCommerce / Visa / Mastercard)
+    "cardinalcommerce.com", "songbird.cardinalcommerce.com", "centinelapi.cardinalcommerce.com",
+    "geo.cardinalcommerce.com", "1.songbird.cardinalcommerce.com", "secure.cardinalcommerce.com",
+    # Stripe & Checkout Gateways
+    "stripe.com", "api.stripe.com", "js.stripe.com", "m.stripe.com", "m.stripe.network",
+    "q.stripe.com", "r.stripe.com", "hooks.stripe.com", "checkout.stripe.com",
+    # Fraud Telemetry & Device Verification (Blocked by AdGuard DNS if not whitelisted!)
+    "online-metrix.net", "h.online-metrix.net", "threatmetrix.com", "iesnare.com",
+    "mpsnare.iesnare.com", "iovation.com", "kount.com", "kaptcha.com", "ssl.kaptcha.com",
+    "sift.com", "siftscience.com", "forter.com", "riskified.com", "signifyd.com", "seon.io",
+    # Checkout CAPTCHA & Anti-Bot Verification
+    "challenges.cloudflare.com", "turnstile.com", "hcaptcha.com", "newassets.hcaptcha.com",
+    "recaptcha.net", "www.recaptcha.net", "gstatic.com", "www.gstatic.com", "arkoselabs.com",
+    "client-api.arkoselabs.com", "funcaptcha.com",
+    # Major E-Commerce & BNPL Checkouts
+    "amazon.com", "www.amazon.com", "completion.amazon.com", "fls-na.amazon.com",
+    "aax.amazon-adsystem.com", "images-amazon.com", "ssl-images-amazon.com",
+    "shopify.com", "checkout.shopify.com", "shop.app", "pay.shopify.com",
+    "klarna.com", "js.klarna.com", "affirm.com", "cdn1.affirm.com",
+    "ebay.com", "www.ebay.com", "pay.ebay.com", "pay.google.com", "apple.com",
+    # Major US/CA Banks
+    "chase.com", "bankofamerica.com", "wellsfargo.com", "citi.com", "capitalone.com", "americanexpress.com"
+]
+
+# 2. Read user-configured split domains
+user_domains = []
+if os.path.isfile(domains_file):
+    with open(domains_file, 'r', encoding='utf-8', errors='replace') as f:
+        for line in f:
+            d = line.strip().lower()
+            if d and not d.startswith('#'):
+                d = re.sub(r'^https?://', '', d).split('/')[0].strip()
+                if d and d not in user_domains:
+                    user_domains.append(d)
+
+# Expand user domains with common CDN companions
+expanded_user = set()
+for d in user_domains:
+    expanded_user.add(d)
+    if not d.startswith('www.') and d.count('.') == 1:
+        expanded_user.add('www.' + d)
+    if 'netflix.com' in d:
+        expanded_user.update(['nflxext.com', 'nflxso.net', 'nflxvideo.net', 'nflximg.net', 'fast.com'])
+    elif 'disneyplus.com' in d:
+        expanded_user.update(['disney-plus.net', 'dssott.com', 'bamgrid.com'])
+    elif 'hulu.com' in d:
+        expanded_user.update(['hulustream.com', 'huluim.com'])
+    elif 'openai.com' in d or 'chatgpt.com' in d:
+        expanded_user.update(['openai.com', 'chatgpt.com', 'oaistatic.com', 'oaiusercontent.com'])
+    elif 'linkedin.com' in d:
+        expanded_user.update(['www.linkedin.com', 'licdn.com', 'media.licdn.com', 'static.licdn.com'])
+
+# Read user's general upstream DNS from settings.conf
+upstream_dns = ["1.1.1.1", "8.8.8.8"]
+if os.path.isfile(settings_file):
+    with open(settings_file, 'r', encoding='utf-8', errors='replace') as f:
+        for line in f:
+            if line.startswith('DEFAULT_DNS='):
+                val = line.split('=', 1)[1].strip().strip('"\'')
+                parsed = []
+                for part in val.split(','):
+                    ip_str = part.strip()
+                    try:
+                        ip_obj = ipaddress.ip_address(ip_str)
+                        if ip_obj.version == 4:
+                            parsed.append(ip_str)
+                    except ValueError:
+                        pass
+                if parsed:
+                    upstream_dns = parsed
+
+# 3. Write dedicated dnsmasq config on port 53530
+os.makedirs(os.path.dirname(dnsmasq_conf), exist_ok=True)
+conf_lines = [
+    "# Cookie Easy WireGuard - Server-Side Split Tunnel & Payment Engine",
+    f"port={dnsmasq_port}",
+    f"listen-address=127.0.0.1,{wg0_ip}",
+    "bind-dynamic",
+    "no-resolv",
+    "no-poll",
+    "no-edns0",
+    "bogus-priv",
+    "cache-size=10000",
+    "dns-forward-max=1000",
+]
+
+# If the host does not have native IPv6 internet egress, filter AAAA so clients never hang on dead IPv6 routes
+if not host_has_ipv6 and has_filter_aaaa:
+    conf_lines.append("filter-AAAA")
+
+for u_ip in upstream_dns:
+    conf_lines.append(f"server={u_ip}")
+
+# Force unfiltered Cloudflare (1.1.1.1) & Google (8.8.8.8) for all Payment & Split domains
+# so AdGuard DNS (94.140.14.49) never blocks payment fraud scripts or 3D-Secure!
+all_payment_roots = sorted(set(PAYMENT_DOMAINS))
+for pdom in all_payment_roots:
+    conf_lines.append(f"server=/{pdom}/1.1.1.1")
+    conf_lines.append(f"server=/{pdom}/8.8.8.8")
+    if has_ipset:
+        conf_lines.append(f"ipset=/.{pdom}/wg_payment_v4")
+
+for sdom in sorted(expanded_user):
+    conf_lines.append(f"server=/{sdom}/1.1.1.1")
+    conf_lines.append(f"server=/{sdom}/8.8.8.8")
+    if has_ipset:
+        conf_lines.append(f"ipset=/.{sdom}/wg_split_v4")
+
+with open(dnsmasq_conf, 'w', encoding='utf-8') as f:
+    f.write('\n'.join(conf_lines) + '\n')
+
+# 4. Pre-populate wg_payment_v4 with official PayPal (AS11643) & Stripe/LinkedIn CIDRs
+PAYMENT_CIDRS = [
+    "64.4.240.0/21", "66.211.168.0/21", "173.0.80.0/20", "173.224.160.0/19",
+    "185.177.52.0/22", "192.148.20.0/23", "198.54.120.0/22", "216.113.160.0/19",
+    "108.174.0.0/20", "144.2.0.0/19"
+]
+for cidr in PAYMENT_CIDRS:
+    subprocess.run(['ipset', 'add', 'wg_payment_v4', cidr, '-exist'], stderr=subprocess.DEVNULL)
+
+# 5. Live-resolve user split domains + key payment endpoints into ipsets immediately
+def resolve_into_ipset(domain_list, set_name):
+    resolved_count = 0
+    for dom in domain_list:
+        ips = set()
+        try:
+            for res in socket.getaddrinfo(dom, None, socket.AF_INET):
+                ip_obj = ipaddress.IPv4Address(res[4][0])
+                if ip_obj.is_global and not ip_obj.is_private:
+                    ips.add(str(ip_obj))
+        except Exception:
+            pass
+        if not ips:
+            try:
+                out = subprocess.check_output(
+                    ['dig', '+time=1', '+tries=1', '+short', '@1.1.1.1', dom, 'A'],
+                    stderr=subprocess.DEVNULL, text=True, timeout=2
+                )
+                for tok in out.splitlines():
+                    try:
+                        ip_obj = ipaddress.IPv4Address(tok.strip())
+                        if ip_obj.is_global and not ip_obj.is_private:
+                            ips.add(str(ip_obj))
+                    except ValueError:
+                        pass
+            except Exception:
+                pass
+        for ip_s in ips:
+            subprocess.run(['ipset', 'add', set_name, f"{ip_s}/24", '-exist'], stderr=subprocess.DEVNULL)
+            resolved_count += 1
+    return resolved_count
+
+core_pay_list = [
+    "paypal.com", "www.paypal.com", "c.paypal.com", "b.stats.paypal.com", "api-m.paypal.com",
+    "paypalobjects.com", "cardinalcommerce.com", "songbird.cardinalcommerce.com",
+    "centinelapi.cardinalcommerce.com", "stripe.com", "api.stripe.com", "js.stripe.com",
+    "m.stripe.network", "braintreegateway.com", "h.online-metrix.net", "amazon.com", "www.amazon.com"
+]
+pay_ips_added = resolve_into_ipset(core_pay_list, 'wg_payment_v4')
+split_ips_added = resolve_into_ipset(sorted(expanded_user), 'wg_split_v4')
+
+with open('/tmp/.wg_split_summary', 'w', encoding='utf-8') as sf:
+    sf.write(f"  \033[0;32m├─ Payment Shield:\033[0m    {len(PAYMENT_DOMAINS)} payment/3DS/fraud domains whitelisted via 1.1.1.1 ({pay_ips_added} live subnets)\n")
+    sf.write(f"  \033[0;32m├─ Split Domains:\033[0m     {len(user_domains)} custom domain(s) active on server ({split_ips_added} live subnets in wg_split_v4)\n")
+PY_SERVER_SPLIT_EOF
+
+    show_progress_bar 75 "Starting server-side DNS split resolver & policy routing..."
+
+    # Remove any conflicting legacy dnsmasq files that bound to port 53
+    rm -f /etc/dnsmasq.d/00-stealth-privacy.conf /etc/dnsmasq.d/wg_split.conf /etc/dnsmasq.d/00-wg-location-stealth.conf 2>/dev/null || true
+
+    local dnsmasq_ok=0
+    if command -v dnsmasq &>/dev/null; then
+        # Validate config; if ipset= is unsupported by this build, strip ipset= lines so dnsmasq still runs
+        if ! dnsmasq --test -C "$DNSMASQ_WG_CONF" >/dev/null 2>&1; then
+            sed -i '/^ipset=/d' "$DNSMASQ_WG_CONF" 2>/dev/null || true
+        fi
+        systemctl enable dnsmasq >/dev/null 2>&1 || true
+        timeout 5 systemctl restart dnsmasq >/dev/null 2>&1 || true
+
+        # Verify dnsmasq is actively answering on port 53530 before redirecting wg0 DNS
+        if command -v dig &>/dev/null && dig +time=1 +tries=1 @127.0.0.1 -p "$DNSMASQ_PORT" cloudflare.com A >/dev/null 2>&1; then
+            dnsmasq_ok=1
+        fi
+    fi
+
+    # Clear old PREROUTING DNS redirect rules first
+    safe_ipt_del iptables -t nat -D PREROUTING -i wg0 -p udp --dport 53 -j REDIRECT --to-ports "$DNSMASQ_PORT"
+    safe_ipt_del iptables -t nat -D PREROUTING -i wg0 -p tcp --dport 53 -j REDIRECT --to-ports "$DNSMASQ_PORT"
+    safe_ipt_del iptables -t nat -D PREROUTING -i wg0 -p udp --dport 53 -j REDIRECT --to-ports 53
+    safe_ipt_del iptables -t nat -D PREROUTING -i wg0 -p tcp --dport 53 -j REDIRECT --to-ports 53
+
+    if [[ "$dnsmasq_ok" -eq 1 ]]; then
+        iptables -C INPUT -i wg0 -p udp --dport "$DNSMASQ_PORT" -j ACCEPT 2>/dev/null || \
+            iptables -I INPUT 1 -i wg0 -p udp --dport "$DNSMASQ_PORT" -j ACCEPT 2>/dev/null || true
+        iptables -C INPUT -i wg0 -p tcp --dport "$DNSMASQ_PORT" -j ACCEPT 2>/dev/null || \
+            iptables -I INPUT 2 -i wg0 -p tcp --dport "$DNSMASQ_PORT" -j ACCEPT 2>/dev/null || true
+
+        iptables -t nat -I PREROUTING 1 -i wg0 -p udp --dport 53 -j REDIRECT --to-ports "$DNSMASQ_PORT" 2>/dev/null || true
+        iptables -t nat -I PREROUTING 2 -i wg0 -p tcp --dport 53 -j REDIRECT --to-ports "$DNSMASQ_PORT" 2>/dev/null || true
+    fi
+
+    # Configure Server-Side Policy Routing Table 200 (Direct Clean Native Egress for Split & Payment Traffic)
+    local def_nic def_gw
+    def_nic=$(ip -4 route show default 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "dev") print $(i+1)}' | head -n1 || echo "eth0")
+    def_gw=$(ip -4 route show default 2>/dev/null | awk '/default/ {print $3}' | head -n1 || true)
+
+    if [[ -n "$def_nic" && -n "$def_gw" ]]; then
+        ip route replace default via "$def_gw" dev "$def_nic" table 200 2>/dev/null || true
+        while ip rule del fwmark 0x200 table 200 2>/dev/null; do :; done
+        ip rule add fwmark 0x200 table 200 priority 100 2>/dev/null || true
+    fi
+
+    if command -v ipset &>/dev/null; then
+        # Priority FORWARD allow rules (bypasses any geo/anti-VPN filter drops)
+        safe_ipt_del iptables -D FORWARD -i wg0 -m set --match-set wg_payment_v4 dst -j ACCEPT
+        safe_ipt_del iptables -D FORWARD -o wg0 -m set --match-set wg_payment_v4 src -j ACCEPT
+        safe_ipt_del iptables -D FORWARD -i wg0 -m set --match-set wg_split_v4 dst -j ACCEPT
+        safe_ipt_del iptables -D FORWARD -o wg0 -m set --match-set wg_split_v4 src -j ACCEPT
+
+        iptables -I FORWARD 1 -i wg0 -m set --match-set wg_payment_v4 dst -j ACCEPT 2>/dev/null || true
+        iptables -I FORWARD 2 -o wg0 -m set --match-set wg_payment_v4 src -j ACCEPT 2>/dev/null || true
+        iptables -I FORWARD 3 -i wg0 -m set --match-set wg_split_v4 dst -j ACCEPT 2>/dev/null || true
+        iptables -I FORWARD 4 -o wg0 -m set --match-set wg_split_v4 src -j ACCEPT 2>/dev/null || true
+
+        # Mark split & payment traffic with 0x200 for direct native routing table 200
+        safe_ipt_del iptables -t mangle -D PREROUTING -i wg0 -m set --match-set wg_payment_v4 dst -j MARK --set-mark 0x200
+        safe_ipt_del iptables -t mangle -D PREROUTING -i wg0 -m set --match-set wg_split_v4 dst -j MARK --set-mark 0x200
+        iptables -t mangle -I PREROUTING 2 -i wg0 -m set --match-set wg_payment_v4 dst -j MARK --set-mark 0x200 2>/dev/null || true
+        iptables -t mangle -I PREROUTING 3 -i wg0 -m set --match-set wg_split_v4 dst -j MARK --set-mark 0x200 2>/dev/null || true
+    fi
+
+    show_progress_bar 100 "Server-side split tunneling & payment engine active!"
+    if [[ -f /tmp/.wg_split_summary ]]; then
+        cat /tmp/.wg_split_summary
+        rm -f /tmp/.wg_split_summary
+    fi
+    if [[ "$dnsmasq_ok" -eq 1 ]]; then
+        echo -e "  ${GREEN}└─ Server DNS Engine:${NC} Active on port ${DNSMASQ_PORT} (Zero client .conf changes needed!)"
+    else
+        echo -e "  ${GREEN}└─ Server IPSet Engine:${NC} Direct CIDR routing active on ${def_nic} (Table 200)"
+    fi
+}
+
 # ------------------------------------------------------------------------------
-# 1. Sensitive Port Protection & Port-In-Use Verification
+# 2. Sensitive Port Protection & Port-In-Use Verification
 # ------------------------------------------------------------------------------
 isSensitivePort() {
     local port="$1"
@@ -208,7 +571,7 @@ isPortInUse() {
 }
 
 # ------------------------------------------------------------------------------
-# 2. Pre-Install Cleanup, Hijack Purge & Deep Uninstaller (Guarded Single Run)
+# 3. Pre-Install Cleanup, Hijack Purge & Deep Uninstaller (Guarded Single Run)
 # ------------------------------------------------------------------------------
 cleanupOldWireguard() {
     local mode="${1:-preinstall}"
@@ -291,7 +654,7 @@ cleanupOldWireguard() {
         done < <(printf "%s\n" "${OLD_PORTS[@]}" | sort -u)
     fi
 
-    show_progress_bar 35 "Stopping WireGuard services and removing WARP/dnsmasq hijacks..."
+    show_progress_bar 35 "Stopping WireGuard services and removing WARP/legacy hijacks..."
     timeout 10 systemctl stop "wg-quick@*" >/dev/null 2>&1 || true
     timeout 10 systemctl disable "wg-quick@*" >/dev/null 2>&1 || true
     timeout 5 systemctl stop warp-svc cbwireguard-web >/dev/null 2>&1 || true
@@ -299,11 +662,10 @@ cleanupOldWireguard() {
 
     while ip rule del fwmark 0x51820 table 51820 2>/dev/null; do :; done
     ip route flush table 51820 2>/dev/null || true
+    while ip rule del fwmark 0x200 table 200 2>/dev/null; do :; done
+    ip route flush table 200 2>/dev/null || true
 
-    if [[ -f /etc/dnsmasq.d/00-stealth-privacy.conf || -f /etc/dnsmasq.d/wg_split.conf ]]; then
-        rm -f /etc/dnsmasq.d/00-stealth-privacy.conf /etc/dnsmasq.d/wg_split.conf /etc/dnsmasq.d/00-wg-location-stealth.conf 2>/dev/null || true
-        timeout 5 systemctl restart dnsmasq >/dev/null 2>&1 || true
-    fi
+    rm -f /etc/dnsmasq.d/00-stealth-privacy.conf /etc/dnsmasq.d/wg_split.conf /etc/dnsmasq.d/00-wg-location-stealth.conf "$DNSMASQ_WG_CONF" 2>/dev/null || true
     if [[ -f /etc/systemd/resolved.conf.d/no-stub.conf ]]; then
         rm -f /etc/systemd/resolved.conf.d/no-stub.conf 2>/dev/null || true
         timeout 5 systemctl restart systemd-resolved >/dev/null 2>&1 || true
@@ -330,8 +692,12 @@ cleanupOldWireguard() {
         safe_ipt_del iptables -D FORWARD -o "$iface" -j ACCEPT
         safe_ipt_del iptables -D FORWARD -o "$iface" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
         safe_ipt_del iptables -D INPUT -i "$iface" -j ACCEPT
+        safe_ipt_del iptables -D INPUT -i "$iface" -p udp --dport "$DNSMASQ_PORT" -j ACCEPT
+        safe_ipt_del iptables -D INPUT -i "$iface" -p tcp --dport "$DNSMASQ_PORT" -j ACCEPT
         safe_ipt_del iptables -t nat -D PREROUTING -i "$iface" -p udp --dport 53 -j REDIRECT --to-ports 53
         safe_ipt_del iptables -t nat -D PREROUTING -i "$iface" -p tcp --dport 53 -j REDIRECT --to-ports 53
+        safe_ipt_del iptables -t nat -D PREROUTING -i "$iface" -p udp --dport 53 -j REDIRECT --to-ports "$DNSMASQ_PORT"
+        safe_ipt_del iptables -t nat -D PREROUTING -i "$iface" -p tcp --dport 53 -j REDIRECT --to-ports "$DNSMASQ_PORT"
         safe_ipt_del ip6tables -D FORWARD -i "$iface" -j ACCEPT
         safe_ipt_del ip6tables -D FORWARD -o "$iface" -j ACCEPT
         safe_ipt_del ip6tables -D FORWARD -i "$iface" -j REJECT
@@ -390,6 +756,8 @@ cleanupOldWireguard() {
         for setname in $wg_ipsets; do
             safe_ipt_del iptables -D INPUT -m set --match-set "$setname" src -j DROP
             safe_ipt_del iptables -D FORWARD -m set --match-set "$setname" src -j DROP
+            safe_ipt_del iptables -D FORWARD -i wg0 -m set --match-set "$setname" dst -j ACCEPT
+            safe_ipt_del iptables -D FORWARD -o wg0 -m set --match-set "$setname" src -j ACCEPT
             safe_ipt_del iptables -t nat -D POSTROUTING -m set --match-set "$setname" dst -o "$def_nic" -j MASQUERADE
             ipset flush "$setname" 2>/dev/null || true
             ipset destroy "$setname" 2>/dev/null || true
@@ -471,7 +839,7 @@ deep_remove_wireguard() {
     for sysd in "${sys_dirs[@]}"; do
         [[ ! -d "$sysd" ]] && continue
         while IFS= read -r -d '' sysf; do
-            if echo "$sysf" | grep -qiE "(wireguard|wg0|wg1|wg-quick|wg_split|cbwireguard|stealth)" || grep -qiE "(wireguard|wg-quick|wg0|wg_split)" "$sysf" 2>/dev/null; then
+            if echo "$sysf" | grep -qiE "(wireguard|wg0|wg1|wg-quick|wg_split|99-wg-server-split|cbwireguard|stealth)" || grep -qiE "(wireguard|wg-quick|wg0|wg_split)" "$sysf" 2>/dev/null; then
                 rm -f "$sysf" 2>/dev/null || true
                 removed_files_count=$((removed_files_count + 1))
             fi
@@ -481,6 +849,9 @@ deep_remove_wireguard() {
     show_progress_bar 95 "Purging WireGuard directories, backups, and saving clean firewall state..."
     rm -rf /etc/wireguard /opt/cbwireguard "$INSTALL_DIR" /root/wireguard_backup* /home/*/easy_wireguard /var/cache/apt/archives/*wireguard* 2>/dev/null || true
 
+    if command -v dnsmasq &>/dev/null && systemctl is-active --quiet dnsmasq 2>/dev/null; then
+        timeout 5 systemctl restart dnsmasq >/dev/null 2>&1 || true
+    fi
     netfilter-persistent save >/dev/null 2>&1 || true
     systemctl daemon-reload >/dev/null 2>&1 || true
     systemctl reset-failed >/dev/null 2>&1 || true
@@ -494,7 +865,7 @@ deep_remove_wireguard() {
 }
 
 # ------------------------------------------------------------------------------
-# 3. Post-Install & Split-Tunnel Config Display (Supports Plain .conf & .conf.enc)
+# 4. Post-Install Config Display (Supports Plain .conf & .conf.enc)
 # ------------------------------------------------------------------------------
 display_post_install_configs() {
     local found_plain=()
@@ -576,10 +947,10 @@ display_post_install_configs() {
                 local dec_text=""
                 if dec_text=$(decrypt_conf_file "$enc_file" "$DEC_PASS"); then
                     echo -e "\n${PURPLE}=================================================================${NC}"
-                    echo -e "${PURPLE}║ ${GREEN}${BOLD}📋 WIREGUARD CLIENT CONFIGURATION (${ecname})${NC}${PURPLE} ║${NC}"
-                    echo -e "${PURPLE}╠════════════════════════════════════════════════════════════════════════════╣${NC}"
+                    echo -e "${GREEN}${BOLD}📋 COPY & PASTE WIREGUARD CLIENT CONFIGURATION (${ecname}):${NC}"
+                    echo -e "${PURPLE}-----------------------------------------------------------------${NC}"
                     echo "$dec_text"
-                    echo -e "${PURPLE}╚════════════════════════════════════════════════════════════════════════════╝${NC}\n"
+                    echo -e "${PURPLE}-----------------------------------------------------------------${NC}\n"
                     if command -v qrencode &>/dev/null; then
                         echo -e "${CYAN}${BOLD}📱 SCAN QR CODE FOR MOBILE / TABLET CLIENT (${ecname}):${NC}\n"
                         echo "$dec_text" | qrencode -t ansiutf8 || true
@@ -594,7 +965,7 @@ display_post_install_configs() {
 }
 
 # ------------------------------------------------------------------------------
-# 4. Companion Scripts Sync & Password/Travel-Mode Patcher
+# 5. Companion Scripts Sync, Double Password Confirmation & Travel/Home Mode
 # ------------------------------------------------------------------------------
 prefetch_companion_scripts() {
     local scripts=("setup_server.sh" "add_client.sh" "user_manager.sh" "backup_manager.sh" "domain_bypass.sh" "remove_server.sh")
@@ -666,32 +1037,34 @@ done
 '''
     code = code.replace(original_line, confirm_block)
 
-# 2. Inject Travel Mode / LAN-Blocking prompt before client generation / conf output
-if script_name in ('add_client.sh', 'setup_server.sh') and 'travel_lan_block' not in code:
+# 2. Inject Travel Mode (LAN Blocking Enabled) vs Home Mode (LAN Blocking Disabled) prompt
+if script_name in ('add_client.sh', 'setup_server.sh') and 'TRAVEL_LAN_OPT' not in code:
     lan_prompt_code = '''
 # --- Travel Mode / LAN Blocking Prompt ---
-echo -e "\\n\\033[0;36m\\033[1mSelect User Operation Mode (LAN Access):\\033[0m"
-echo -e "   1) \\033[0;32mHome Mode (LAN Access Enabled)\\033[0m - Allows access to local network printers, shares, and casting devices"
-echo -e "   2) \\033[0;32mTravel Mode (LAN Blocking Enabled)\\033[0m - Blocks local network traffic when connected on public Wi-Fi/hotels"
-read -rp "Select mode [1-2, default 2 (Travel / LAN Blocking)]: " TRAVEL_OPT
-TRAVEL_OPT=${TRAVEL_OPT:-2}
+echo -e "\\n\\033[0;36m\\033[1mSelect Local Network (LAN) Traffic Mode for this Client:\\033[0m"
+echo -e "   1) \\033[0;32mTravel Mode (LAN Blocking Enabled)\\033[0m  - Blocks local Wi-Fi/hotel network traffic (AllowedIPs = 0.0.0.0/0)"
+echo -e "   2) \\033[0;32mHome Mode (LAN Blocking Disabled)\\033[0m   - Allows local home printers/NAS/casting (AllowedIPs = 0.0.0.0/1, 128.0.0.0/1)"
+read -rp "Select mode [1-2, default 1 (Travel Mode - LAN Blocking Enabled)]: " TRAVEL_LAN_OPT
+TRAVEL_LAN_OPT=${TRAVEL_LAN_OPT:-1}
 
-if [[ "$TRAVEL_OPT" == "1" ]]; then
-    echo -e "\\033[0;32m[✔] Home Mode selected (LAN access permitted).\\033[0m"
+if [[ "$TRAVEL_LAN_OPT" == "2" ]]; then
+    echo -e "\\033[0;32m[✔] Home Mode selected (LAN Blocking Disabled: 0.0.0.0/1, 128.0.0.0/1).\\033[0m\\n"
+    DEFAULT_ALLOWED_IPS="0.0.0.0/1, 128.0.0.0/1"
+    ALLOWED_IPS="0.0.0.0/1, 128.0.0.0/1"
 else
-    echo -e "\\033[0;32m[✔] Travel Mode selected (LAN blocking active via AllowedIPs restriction).\\033[0m"
-    # Append local RFC1918 exclusion to AllowedIPs if full tunnel so local broadcast/LAN traffic is dropped by client OS
-    if [[ -n "${ALLOWED_IPS:-}" && "${ALLOWED_IPS:-}" == *"0.0.0.0/0"* ]]; then
-        ALLOWED_IPS="0.0.0.0/5, 8.0.0.0/7, 11.0.0.0/8, 12.0.0.0/6, 16.0.0.0/4, 32.0.0.0/3, 64.0.0.0/2, 128.0.0.0/1"
-    fi
+    echo -e "\\033[0;32m[✔] Travel Mode selected (LAN Blocking Enabled: 0.0.0.0/0).\\033[0m\\n"
+    DEFAULT_ALLOWED_IPS="0.0.0.0/0"
+    ALLOWED_IPS="0.0.0.0/0"
 fi
 # -----------------------------------------
 '''
-    pos = code.find('ALLOWED_IPS')
-    if pos == -1:
-        pos = code.find('[Peer]')
+    # Insert right before client config [Interface] block is written
+    pos = code.find('[Interface]')
     if pos != -1:
-        code = code[:pos] + lan_prompt_code + '\n' + code[pos:]
+        line_start = code.rfind('\n', 0, pos)
+        prev_line_start = code.rfind('\n', 0, line_start) if line_start != -1 else 0
+        insert_at = prev_line_start if prev_line_start != -1 else 0
+        code = code[:insert_at] + '\n' + lan_prompt_code + '\n' + code[insert_at:]
 
 if 'qrencode' in code and 'COPY & PASTE WIREGUARD CLIENT CONFIGURATION' not in code:
     code = re.sub(
@@ -709,7 +1082,7 @@ PY_CLIENT_PATCH_EOF
 }
 
 # ------------------------------------------------------------------------------
-# 5. Safe Setup Server Patcher (Neutralizes redundant internal cleanup via WG_SKIP_CLEANUP=1)
+# 6. Safe Setup Server Patcher (Single Cleanup + Port/DNS Selector + Payment Engine)
 # ------------------------------------------------------------------------------
 run_setup_server() {
     rm -f /tmp/.wg_cleanup_done
@@ -827,23 +1200,23 @@ select_safe_wg_port() {
 }
 
 select_safe_dns_resolver() {
-    echo -e "\033[0;36m\033[1mSelect DNS Resolver for Clients (Standard Port 53 & Secure Anycast):\033[0m"
-    echo -e "   1) \033[0;32mAdGuard + Quad9 Default\033[0m (94.140.14.49, 9.9.9.9, 94.140.14.59 | Original Default) \033[0;35m[RECOMMENDED]\033[0m"
-    echo -e "   2) \033[0;32mCloudflare Anycast\033[0m      (1.1.1.1, 1.0.0.1 | Port 53 - Fastest Global Anycast)"
-    echo -e "   3) \033[0;32mAdGuard Stealth\033[0m         (94.140.14.14, 94.140.15.15 | Port 53 - Ad & Tracking Block)"
-    echo -e "   4) \033[0;32mQuad9 Swiss Shield\033[0m      (9.9.9.9, 149.112.112.112 | Port 53 - Threat Intelligence)"
-    echo -e "   5) \033[0;32mGoogle Public DNS\033[0m       (8.8.8.8, 8.8.4.4 | Port 53 - High Availability Anycast)"
-    echo -e "   6) \033[0;32mMullvad Privacy\033[0m         (194.242.2.2, 194.242.2.3 | Port 53 - Strict Zero-Logs)"
-    echo -e "   7) \033[0;32mControl D Stealth\033[0m       (76.76.2.0, 76.76.10.0 | Port 53 - Uncensored Anti-Throttle)"
-    echo -e "   8) \033[0;32mOpenDNS / Cisco\033[0m         (208.67.222.222, 208.67.220.220 | Port 53 - Reliability)"
+    echo -e "\033[0;36m\033[1mSelect DNS Resolver for Clients (Standard Port 53 & Payment-Safe Anycast):\033[0m"
+    echo -e "   1) \033[0;32mCloudflare + Google Anycast\033[0m (1.1.1.1, 8.8.8.8 | Fastest & 100% Payment/Shopping Compatible) \033[0;35m[RECOMMENDED]\033[0m"
+    echo -e "   2) \033[0;32mAdGuard + Quad9 Default\033[0m     (94.140.14.49, 9.9.9.9, 94.140.14.59 | Ad-Block + Server Payment Bypass)"
+    echo -e "   3) \033[0;32mCloudflare Pure Anycast\033[0m     (1.1.1.1, 1.0.0.1 | Port 53 - Ultra Low Latency)"
+    echo -e "   4) \033[0;32mQuad9 Swiss Shield\033[0m          (9.9.9.9, 149.112.112.112 | Port 53 - Threat Intelligence)"
+    echo -e "   5) \033[0;32mGoogle Public DNS\033[0m           (8.8.8.8, 8.8.4.4 | Port 53 - High Availability Anycast)"
+    echo -e "   6) \033[0;32mMullvad Privacy\033[0m             (194.242.2.2, 194.242.2.3 | Port 53 - Strict Zero-Logs)"
+    echo -e "   7) \033[0;32mControl D Uncensored\033[0m        (76.76.2.0, 76.76.10.0 | Port 53 - Anti-Throttle)"
+    echo -e "   8) \033[0;32mOpenDNS / Cisco\033[0m             (208.67.222.222, 208.67.220.220 | Port 53 - Reliability)"
     echo -e "   9) Custom DNS Resolvers"
 
     read -rp "Select DNS Resolver [1-9, default 1]: " DNS_OPT
     DNS_OPT=${DNS_OPT:-1}
 
     case "$DNS_OPT" in
-        2) CLIENT_DNS="1.1.1.1, 1.0.0.1" ;;
-        3) CLIENT_DNS="94.140.14.14, 94.140.15.15" ;;
+        2) CLIENT_DNS="94.140.14.49, 9.9.9.9, 94.140.14.59" ;;
+        3) CLIENT_DNS="1.1.1.1, 1.0.0.1" ;;
         4) CLIENT_DNS="9.9.9.9, 149.112.112.112" ;;
         5) CLIENT_DNS="8.8.8.8, 8.8.4.4" ;;
         6) CLIENT_DNS="194.242.2.2, 194.242.2.3" ;;
@@ -851,10 +1224,10 @@ select_safe_dns_resolver() {
         8) CLIENT_DNS="208.67.222.222, 208.67.220.220" ;;
         9)
             read -rp "Enter Primary DNS: " -e -i "1.1.1.1" C_DNS1
-            read -rp "Enter Secondary DNS: " -e -i "1.0.0.1" C_DNS2
+            read -rp "Enter Secondary DNS: " -e -i "8.8.8.8" C_DNS2
             CLIENT_DNS="${C_DNS1}, ${C_DNS2}"
             ;;
-        1|*) CLIENT_DNS="94.140.14.49, 9.9.9.9, 94.140.14.59" ;;
+        1|*) CLIENT_DNS="1.1.1.1, 8.8.8.8" ;;
     esac
 
     echo -e "\033[0;32m[✔] Selected DNS Resolvers: ${CLIENT_DNS}\033[0m\n"
@@ -891,7 +1264,7 @@ content = re.sub(
     content
 )
 
-# Neutralize the internal setup_server.sh cleanup function so it never runs a second time
+# Neutralize the secondary cleanup block inside setup_server.sh so it only runs once
 content = re.sub(
     r'(?m)^([ \t]*(?:function\s+)?cleanupOldWireguard[ \t]*\(\)[ \t]*\{)',
     r'\1 return 0;',
@@ -902,6 +1275,25 @@ content = re.sub(
     r': # cleanupOldWireguard skipped',
     content
 )
+
+# Also neutralize raw inline "Cleaning up any existing WireGuard instances..." block in setup_server.sh
+lines = content.splitlines()
+cleaned_setup_lines = []
+skip_inline_cleanup = False
+for line in lines:
+    if 'Cleaning up any existing WireGuard instances' in line:
+        skip_inline_cleanup = True
+        cleaned_setup_lines.append(': # inline cleanup skipped (already completed by manager)')
+        continue
+    if skip_inline_cleanup:
+        if 'Installing WireGuard and required dependencies' in line:
+            skip_inline_cleanup = False
+            cleaned_setup_lines.append(line)
+        else:
+            cleaned_setup_lines.append('# ' + line)
+        continue
+    cleaned_setup_lines.append(line)
+content = '\n'.join(cleaned_setup_lines) + '\n'
 
 content = re.sub(
     r'PostUp\s*=\s*(/root/easy_wireguard/geo_vpn_filter\.sh\s+--apply)(?!\s*\|\|)',
@@ -975,346 +1367,34 @@ PY_EOF
     rm -f "$port_selector_file"
     WG_SKIP_CLEANUP=1 "$target_script"
 
-    ensure_server_forwarding_active
+    # Activate Server-Side Split Tunneling & Payment Optimization Engine automatically
+    apply_server_side_split_and_payment_engine
     display_post_install_configs
 }
 
 # ------------------------------------------------------------------------------
-# 6. Domain-Based Split Tunneling Engine
+# 7. Server-Side Domain Split Tunneling Menu
 # ------------------------------------------------------------------------------
-recalculate_and_apply_split_tunnel() {
-    echo -e "\n${CYAN}${BOLD}[*] Updating Domain-Based Split Tunneling Routes...${NC}"
-
-    ensure_server_forwarding_active
-
-    show_progress_bar 15 "Checking DNS & routing utilities..."
-    for tool_pkg in "dig:dnsutils" "python3:python3" "qrencode:qrencode"; do
-        local bin="${tool_pkg%%:*}"
-        local pkg="${tool_pkg##*:}"
-        if ! command -v "$bin" &>/dev/null && command -v apt-get &>/dev/null; then
-            apt-get update -o Acquire::Languages=none -qq >/dev/null 2>&1 || true
-            apt-get install -y -qq "$pkg" >/dev/null 2>&1 || true
-        fi
-    done
-
-    local mode
-    mode=$(cat "$SPLIT_MODE_FILE" 2>/dev/null || echo "BYPASS")
-
-    local srv_pub_ip=""
-    srv_pub_ip=$(grep -rhE "^[[:space:]]*Endpoint[[:space:]]*=" /etc/wireguard "$INSTALL_DIR" /root 2>/dev/null | head -n1 | awk -F'=' '{print $2}' | cut -d':' -f1 | tr -d ' \t\r\n' || true)
-    if [[ -z "$srv_pub_ip" ]]; then
-        srv_pub_ip=$(curl -4 -sSf --max-time 2 https://api.ipify.org 2>/dev/null || ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '^127\.' | grep -v '^10\.' | head -n1 || true)
-    fi
-
-    local wg_int_subnet="10.8.0.0/24"
-    if [[ -f /etc/wireguard/wg0.conf ]]; then
-        local wg_addr
-        wg_addr=$(grep -iE "^[[:space:]]*Address[[:space:]]*=" /etc/wireguard/wg0.conf 2>/dev/null | head -n1 | awk -F'=' '{print $2}' | cut -d',' -f1 | tr -d ' \t\r\n' || true)
-        [[ -n "$wg_addr" ]] && wg_int_subnet="$wg_addr"
-    fi
-
-    show_progress_bar 45 "Resolving domains & protecting Endpoint (${srv_pub_ip:-auto}) + LAN..."
-
-    python3 - "$BYPASS_DOMAINS_FILE" "$SETTINGS_FILE" "$mode" "$INSTALL_DIR" "$srv_pub_ip" "$wg_int_subnet" << 'PY_SPLIT_EOF'
-import sys, os, re, socket, subprocess, ipaddress
-
-domains_file = sys.argv[1]
-settings_file = sys.argv[2]
-mode = sys.argv[3].strip().upper()
-install_dir = sys.argv[4]
-srv_pub_ip_str = sys.argv[5].strip()
-wg_int_subnet_str = sys.argv[6].strip()
-
-raw_domains = []
-if os.path.isfile(domains_file):
-    with open(domains_file, 'r', encoding='utf-8', errors='replace') as f:
-        for line in f:
-            d = line.strip().lower()
-            if d and not d.startswith('#'):
-                d = re.sub(r'^https?://', '', d).split('/')[0].strip()
-                if d and d not in raw_domains:
-                    raw_domains.append(d)
-
-dns_ips = set()
-if os.path.isfile(settings_file):
-    with open(settings_file, 'r', encoding='utf-8', errors='replace') as f:
-        for line in f:
-            if line.startswith('DEFAULT_DNS='):
-                val = line.split('=', 1)[1].strip().strip('"\'')
-                for part in val.split(','):
-                    ip_str = part.strip()
-                    try:
-                        ip_obj = ipaddress.ip_address(ip_str)
-                        if ip_obj.version == 4:
-                            dns_ips.add(ip_obj)
-                    except ValueError:
-                        pass
-
-try:
-    wg_internal_net = ipaddress.IPv4Network(wg_int_subnet_str, strict=False)
-except Exception:
-    wg_internal_net = ipaddress.IPv4Network("10.8.0.0/24", strict=False)
-
-srv_pub_net = None
-if srv_pub_ip_str:
-    try:
-        srv_pub_net = ipaddress.IPv4Network(f"{srv_pub_ip_str}/32", strict=False)
-    except ValueError:
-        srv_pub_net = None
-
-expanded_domains = set()
-for d in raw_domains:
-    expanded_domains.add(d)
-    if not d.startswith('www.') and d.count('.') == 1:
-        expanded_domains.add('www.' + d)
-
-resolved_v4 = set()
-for dom in sorted(expanded_domains):
-    try:
-        for res in socket.getaddrinfo(dom, None, socket.AF_INET):
-            ip_obj = ipaddress.IPv4Address(res[4][0])
-            if ip_obj.is_global and not ip_obj.is_multicast and not ip_obj.is_unspecified and not ip_obj.is_loopback and not ip_obj.is_private:
-                resolved_v4.add(ip_obj)
-    except Exception:
-        pass
-
-    for resolver in ['1.1.1.1', '8.8.8.8']:
-        try:
-            out = subprocess.check_output(
-                ['dig', '+time=2', '+tries=1', '+short', f'@{resolver}', dom, 'A'],
-                stderr=subprocess.DEVNULL,
-                text=True,
-                timeout=3
-            )
-            for token in out.splitlines():
-                token = token.strip()
-                try:
-                    ip_obj = ipaddress.IPv4Address(token)
-                    if ip_obj.is_global and not ip_obj.is_multicast and not ip_obj.is_unspecified and not ip_obj.is_loopback and not ip_obj.is_private:
-                        resolved_v4.add(ip_obj)
-                except ValueError:
-                    pass
-        except Exception:
-            pass
-
-if not raw_domains:
-    final_allowed_ips = "0.0.0.0/1, 128.0.0.0/1"
-    subnet_count = 0
-else:
-    domain_nets = []
-    for ip_obj in resolved_v4:
-        if ip_obj in dns_ips:
-            continue
-        if srv_pub_net and ip_obj == srv_pub_net.network_address:
-            continue
-        net24 = ipaddress.IPv4Network(f"{ip_obj}/24", strict=False)
-        if any(d_ip in net24 for d_ip in dns_ips) or (srv_pub_net and srv_pub_net.subnet_of(net24)):
-            domain_nets.append(ipaddress.IPv4Network(f"{ip_obj}/32", strict=False))
-        else:
-            domain_nets.append(net24)
-
-    target_nets = list(ipaddress.collapse_addresses(domain_nets))
-    subnet_count = len(target_nets)
-
-    if mode == "ONLY_VPN":
-        include_nets = list(target_nets) + [wg_internal_net] + [ipaddress.IPv4Network(f"{d_ip}/32") for d_ip in dns_ips]
-        collapsed_inc = list(ipaddress.collapse_addresses(include_nets))
-        if srv_pub_net:
-            safe_inc = []
-            for net in collapsed_inc:
-                if net.overlaps(srv_pub_net):
-                    if srv_pub_net.subnet_of(net):
-                        safe_inc.extend(net.address_exclude(srv_pub_net))
-                else:
-                    safe_inc.append(net)
-            collapsed_inc = list(ipaddress.collapse_addresses(safe_inc))
-        final_allowed_ips = ", ".join(str(n) for n in collapsed_inc)
-    else:
-        exclusions = list(target_nets)
-        if srv_pub_net:
-            exclusions.append(srv_pub_net)
-        exclusions.extend([
-            ipaddress.IPv4Network("0.0.0.0/8"),
-            ipaddress.IPv4Network("10.0.0.0/8"),
-            ipaddress.IPv4Network("100.64.0.0/10"),
-            ipaddress.IPv4Network("127.0.0.0/8"),
-            ipaddress.IPv4Network("169.254.0.0/16"),
-            ipaddress.IPv4Network("172.16.0.0/12"),
-            ipaddress.IPv4Network("192.168.0.0/16"),
-            ipaddress.IPv4Network("224.0.0.0/3"),
-        ])
-        collapsed_exclusions = list(ipaddress.collapse_addresses(exclusions))
-
-        allowed_pool = [ipaddress.IPv4Network("0.0.0.0/1"), ipaddress.IPv4Network("128.0.0.0/1")]
-        for excl in collapsed_exclusions:
-            next_pool = []
-            for net in allowed_pool:
-                if net.overlaps(excl):
-                    if excl.subnet_of(net):
-                        next_pool.extend(net.address_exclude(excl))
-                else:
-                    next_pool.append(net)
-            allowed_pool = next_pool
-
-        allowed_pool.append(wg_internal_net)
-        for d_ip in dns_ips:
-            allowed_pool.append(ipaddress.IPv4Network(f"{d_ip}/32"))
-
-        collapsed_pool = list(ipaddress.collapse_addresses(allowed_pool))
-        final_allowed_ips = ", ".join(str(n) for n in collapsed_pool)
-
-with open('/tmp/.wg_computed_allowed_ips', 'w', encoding='utf-8') as af:
-    af.write(final_allowed_ips)
-
-settings_lines = []
-found_key = False
-if os.path.isfile(settings_file):
-    with open(settings_file, 'r', encoding='utf-8', errors='replace') as f:
-        for line in f:
-            if line.startswith('DEFAULT_ALLOWED_IPS='):
-                settings_lines.append(f'DEFAULT_ALLOWED_IPS="{final_allowed_ips}"\n')
-                found_key = True
-            else:
-                settings_lines.append(line)
-if not found_key:
-    settings_lines.append(f'DEFAULT_ALLOWED_IPS="{final_allowed_ips}"\n')
-
-with open(settings_file, 'w', encoding='utf-8') as f:
-    f.writelines(settings_lines)
-
-with open('/tmp/.wg_split_summary', 'w', encoding='utf-8') as sf:
-    sf.write(f"  \033[0;32m├─ Split Mode:\033[0m        {mode} ({len(raw_domains)} domain(s) -> {subnet_count} bypassed subnet(s))\n")
-    sf.write(f"  \033[0;32m├─ Loop Protection:\033[0m   Server Endpoint ({srv_pub_ip_str or 'auto'}/32) & Local Wi-Fi LAN excluded\n")
-PY_SPLIT_EOF
-
-    local new_allowed_ips
-    new_allowed_ips=$(cat /tmp/.wg_computed_allowed_ips 2>/dev/null || echo "0.0.0.0/1, 128.0.0.0/1")
-    rm -f /tmp/.wg_computed_allowed_ips
-
-    show_progress_bar 100 "Split-tunnel CIDR calculation complete!"
-    if [[ -f /tmp/.wg_split_summary ]]; then
-        cat /tmp/.wg_split_summary
-        rm -f /tmp/.wg_split_summary
-    fi
-
-    local updated_count=0
-    local search_paths=("/etc/wireguard/clients" "$INSTALL_DIR" "/root" "/etc/wireguard")
-    if [[ -n "${SUDO_USER:-}" && -d "/home/${SUDO_USER}" ]]; then
-        search_paths+=("/home/${SUDO_USER}")
-    fi
-
-    local seen_real="|"
-    for spath in "${search_paths[@]}"; do
-        [[ ! -d "$spath" ]] && continue
-        while IFS= read -r -d '' cfg; do
-            local base
-            base=$(basename "$cfg")
-            [[ "$base" == "wg0.conf" || "$base" == "wg1.conf" || "$base" == "settings.conf" || "$base" == "resolv.conf" || "$base" == "sysctl.conf" ]] && continue
-            local rpath
-            rpath=$(realpath "$cfg" 2>/dev/null || echo "$cfg")
-            [[ "$seen_real" == *"|${rpath}|"* ]] && continue
-            if grep -q "\[Interface\]" "$cfg" 2>/dev/null && grep -q "Endpoint" "$cfg" 2>/dev/null; then
-                python3 -c '
-import sys, re
-p, ips = sys.argv[1], sys.argv[2]
-with open(p, "r") as f: txt = f.read()
-txt = re.sub(r"(?m)^(\s*AllowedIPs\s*=\s*).*$", lambda m: m.group(1) + ips, txt)
-with open(p, "w") as f: f.write(txt)
-' "$cfg" "$new_allowed_ips"
-                seen_real+="${rpath}|"
-                updated_count=$((updated_count + 1))
-                echo -e "  ${GREEN}└─ Updated Plain Config:${NC} ${cfg}"
-                echo -e "\n${PURPLE}=================================================================${NC}"
-                echo -e "${GREEN}${BOLD}📋 UPDATED SPLIT-TUNNEL CONFIG (${base}) - RE-IMPORT INTO CLIENT:${NC}"
-                echo -e "${PURPLE}-----------------------------------------------------------------${NC}"
-                cat "$cfg"
-                echo -e "${PURPLE}-----------------------------------------------------------------${NC}\n"
-                if command -v qrencode &>/dev/null; then
-                    echo -e "${CYAN}${BOLD}📱 SCAN UPDATED QR CODE (${base}):${NC}\n"
-                    qrencode -t ansiutf8 < "$cfg" || true
-                    echo ""
-                fi
-            fi
-        done < <(find "$spath" -maxdepth 2 -type f -name "*.conf" -print0 2>/dev/null || true)
-    done
-
-    local seen_enc_real="|"
-    for spath in "${search_paths[@]}"; do
-        [[ ! -d "$spath" ]] && continue
-        while IFS= read -r -d '' ecfg; do
-            local erpath
-            erpath=$(realpath "$ecfg" 2>/dev/null || echo "$ecfg")
-            [[ "$seen_enc_real" == *"|${erpath}|"* ]] && continue
-            seen_enc_real+="${erpath}|"
-            local ebname
-            ebname=$(basename "$ecfg" .enc)
-
-            echo -e "\n${CYAN}🔒 Found encrypted client profile: ${BOLD}${ebname}${NC} (${ecfg})"
-            read -s -rp "Enter password for '${ebname}' to inject split-tunnel AllowedIPs: " ENC_PASS
-            echo ""
-            if [[ -n "$ENC_PASS" ]]; then
-                local plain_txt=""
-                if plain_txt=$(decrypt_conf_file "$ecfg" "$ENC_PASS"); then
-                    local updated_txt
-                    updated_txt=$(python3 -c '
-import sys, re
-txt, ips = sys.stdin.read(), sys.argv[1]
-print(re.sub(r"(?m)^(\s*AllowedIPs\s*=\s*).*$", lambda m: m.group(1) + ips, txt), end="")
-' "$new_allowed_ips" <<< "$plain_txt")
-                    encrypt_conf_file "$updated_txt" "$ecfg" "$ENC_PASS"
-                    updated_count=$((updated_count + 1))
-                    echo -e "${GREEN}[✔] Updated & re-encrypted ${ecfg}!${NC}"
-                    echo -e "\n${PURPLE}=================================================================${NC}"
-                    echo -e "${GREEN}${BOLD}📋 UPDATED SPLIT-TUNNEL CONFIG (${ebname}) - COPY & PASTE TO CLIENT:${NC}"
-                    echo -e "${PURPLE}-----------------------------------------------------------------${NC}"
-                    echo "$updated_txt"
-                    echo -e "${PURPLE}-----------------------------------------------------------------${NC}\n"
-                    if command -v qrencode &>/dev/null; then
-                        echo -e "${CYAN}${BOLD}📱 SCAN UPDATED QR CODE (${ebname}):${NC}\n"
-                        echo "$updated_txt" | qrencode -t ansiutf8 || true
-                        echo ""
-                    fi
-                else
-                    echo -e "${RED}[!] Incorrect password for ${ebname}.${NC}"
-                fi
-            fi
-        done < <(find "$spath" -maxdepth 2 -type f -name "*.conf.enc" -print0 2>/dev/null || true)
-    done
-
-    if [[ $updated_count -eq 0 ]]; then
-        echo -e "${YELLOW}[!] Note: New clients created via Option [2] will automatically use the updated split-tunnel AllowedIPs.${NC}"
-    else
-        echo -e "${YELLOW}${BOLD}⚠️  IMPORTANT: Scan the QR code (or copy/paste the config above) into your WireGuard client app and reconnect!${NC}"
-    fi
-
-    if [[ -f "$SETTINGS_FILE" ]]; then
-        # shellcheck source=/dev/null
-        source "$SETTINGS_FILE"
-    fi
-}
-
 domain_split_tunnel_menu() {
     while true; do
         [[ ! -f "$BYPASS_DOMAINS_FILE" ]] && touch "$BYPASS_DOMAINS_FILE"
-        [[ ! -f "$SPLIT_MODE_FILE" ]] && echo "BYPASS" > "$SPLIT_MODE_FILE"
 
-        local mode
-        mode=$(cat "$SPLIT_MODE_FILE" 2>/dev/null || echo "BYPASS")
         local dom_count
         dom_count=$(awk '!/^(#|[[:space:]]*$)/ {c++} END {print c+0}' "$BYPASS_DOMAINS_FILE" 2>/dev/null || echo 0)
 
         echo -e "\n${PURPLE}┌──────────────────────────────────────────────────────────────┐${NC}"
-        echo -e "${PURPLE}│             ${GREEN}${BOLD}🌐 Domain-Based Split Tunneling Manager${NC}          ${PURPLE}│${NC}"
+        echo -e "${PURPLE}│       ${GREEN}${BOLD}🌐 Server-Side Split Tunneling & Payment Manager${NC}       ${PURPLE}│${NC}"
         echo -e "${PURPLE}├──────────────────────────────────────────────────────────────┤${NC}"
-        echo -e "${PURPLE}│${NC} ${BOLD}Active Mode:${NC}    ${CYAN}${mode}${NC} (Endpoint & LAN Loop-Protected)    ${PURPLE}│${NC}"
-        echo -e "${PURPLE}│${NC} ${BOLD}Active Domains:${NC} ${YELLOW}${dom_count} domain(s) configured${NC}                    ${PURPLE}│${NC}"
+        echo -e "${PURPLE}│${NC} ${BOLD}Engine Mode:${NC}    ${CYAN}100% SERVER-SIDE${NC} (dnsmasq + ipset + Table 200)${PURPLE}│${NC}"
+        echo -e "${PURPLE}│${NC} ${BOLD}Payment Shield:${NC} ${GREEN}ACTIVE${NC} (PayPal, Stripe, 3DS, Amazon, Banks)   ${PURPLE}│${NC}"
+        echo -e "${PURPLE}│${NC} ${BOLD}Custom Domains:${NC} ${YELLOW}${dom_count} domain(s) configured on server${NC}              ${PURPLE}│${NC}"
         echo -e "${PURPLE}├──────────────────────────────────────────────────────────────┤${NC}"
-        echo -e "${PURPLE}│${NC} [1] Add Domain(s) (e.g. icanhazip.com, netflix.com)          ${PURPLE}│${NC}"
+        echo -e "${PURPLE}│${NC} [1] Add Domain(s) to Server Split-Tunnel (Live, Zero Re-Scan)${PURPLE}│${NC}"
         echo -e "${PURPLE}│${NC} [2] Remove a Domain                                          ${PURPLE}│${NC}"
-        echo -e "${PURPLE}│${NC} [3] Add Preset Category (Streaming, Banking, AI, IP-Check)   ${PURPLE}│${NC}"
-        echo -e "${PURPLE}│${NC} [4] Toggle Mode (BYPASS VPN vs ROUTE ONLY LISTED VIA VPN)    ${PURPLE}│${NC}"
-        echo -e "${PURPLE}│${NC} [5] Re-Apply & Print Updated Client Config + QR Code         ${PURPLE}│${NC}"
-        echo -e "${PURPLE}│${NC} [6] Clear All Split Domains (Reset to Full Tunnel)           ${PURPLE}│${NC}"
+        echo -e "${PURPLE}│${NC} [3] Add Preset Category (Shopping/Payments, Streaming, AI)   ${PURPLE}│${NC}"
+        echo -e "${PURPLE}│${NC} [4] View Active Split Domains & Live Server IPSet Status     ${PURPLE}│${NC}"
+        echo -e "${PURPLE}│${NC} [5] Force Refresh Server-Side Split & Payment Rules Now      ${PURPLE}│${NC}"
+        echo -e "${PURPLE}│${NC} [6] Clear Custom Split Domains (Keep Payment Shield Active)  ${PURPLE}│${NC}"
         echo -e "${PURPLE}│${NC} [b] Back to Main Menu                                        ${PURPLE}│${NC}"
         echo -e "${PURPLE}└──────────────────────────────────────────────────────────────┘${NC}"
         echo -en "${GREEN}Select option: ${NC}"
@@ -1322,7 +1402,7 @@ domain_split_tunnel_menu() {
 
         case "$SPLIT_OPT" in
             1)
-                echo -en "${GREEN}Enter domain(s) to split-tunnel (comma or space separated): ${NC}"
+                echo -en "${GREEN}Enter domain(s) to split-tunnel on server (comma or space separated): ${NC}"
                 read -r INPUT_DOMS
                 local added=0
                 for raw_d in ${INPUT_DOMS//,/ }; do
@@ -1339,14 +1419,14 @@ domain_split_tunnel_menu() {
                     fi
                 done
                 if [[ $added -gt 0 ]]; then
-                    recalculate_and_apply_split_tunnel
+                    apply_server_side_split_and_payment_engine
                 fi
                 ;;
             2)
                 if [[ "$dom_count" -eq 0 ]]; then
-                    echo -e "${YELLOW}No domains currently configured.${NC}"
+                    echo -e "${YELLOW}No custom domains currently configured.${NC}"
                 else
-                    echo -e "\n${CYAN}Configured Domains:${NC}"
+                    echo -e "\n${CYAN}Configured Custom Split Domains:${NC}"
                     awk '!/^(#|[[:space:]]*$)/ {printf "  %2d) %s\n", ++i, $0}' "$BYPASS_DOMAINS_FILE"
                     echo -en "${GREEN}Enter number to remove [1-${dom_count}]: ${NC}"
                     read -r DEL_IDX
@@ -1356,61 +1436,60 @@ domain_split_tunnel_menu() {
                         grep -v -F -x "$target_d" "$BYPASS_DOMAINS_FILE" > "${BYPASS_DOMAINS_FILE}.tmp" || true
                         mv "${BYPASS_DOMAINS_FILE}.tmp" "$BYPASS_DOMAINS_FILE"
                         echo -e "${GREEN}[✔] Removed '${target_d}'.${NC}"
-                        recalculate_and_apply_split_tunnel
+                        apply_server_side_split_and_payment_engine
                     else
                         echo -e "${RED}Invalid selection.${NC}"
                     fi
                 fi
                 ;;
             3)
-                echo -e "\n${CYAN}Select Preset Category:${NC}"
-                echo "  1) Streaming (Netflix, Hulu, Disney+, Prime Video, Max, Spotify)"
-                echo "  2) Banking & Payments (PayPal, Stripe, Chase, Bank of America, Wells Fargo)"
+                echo -e "\n${CYAN}Select Server-Side Preset Category:${NC}"
+                echo "  1) Online Shopping, Payments & 3D-Secure (PayPal, Stripe, Amazon, Shopify, Klarna, Banks)"
+                echo "  2) Streaming Services (Netflix, Hulu, Disney+, Prime Video, Max, Spotify)"
                 echo "  3) AI Services (ChatGPT, OpenAI, Claude, Gemini, Perplexity)"
                 echo "  4) Gaming & Social (Discord, Twitch, Steam, Epic Games, LinkedIn)"
-                echo "  5) IP Checkers for Testing Split-Tunnel (icanhazip.com, api.ipify.org)"
-                echo -en "${GREEN}Select preset [1-5]: ${NC}"
+                echo -en "${GREEN}Select preset [1-4]: ${NC}"
                 read -r PRESET_CHOICE
                 local preset_list=()
                 case "$PRESET_CHOICE" in
-                    1) preset_list=("netflix.com" "hulu.com" "disneyplus.com" "primevideo.com" "amazon.com" "max.com" "spotify.com") ;;
-                    2) preset_list=("paypal.com" "stripe.com" "chase.com" "bankofamerica.com" "wellsfargo.com") ;;
+                    1) preset_list=("paypal.com" "paypalobjects.com" "cardinalcommerce.com" "braintreegateway.com" "stripe.com" "online-metrix.net" "amazon.com" "shopify.com" "klarna.com" "affirm.com" "ebay.com" "chase.com" "bankofamerica.com" "wellsfargo.com") ;;
+                    2) preset_list=("netflix.com" "hulu.com" "disneyplus.com" "primevideo.com" "max.com" "spotify.com") ;;
                     3) preset_list=("openai.com" "chatgpt.com" "claude.ai" "anthropic.com" "gemini.google.com" "perplexity.ai") ;;
                     4) preset_list=("discord.com" "twitch.tv" "steampowered.com" "epicgames.com" "linkedin.com") ;;
-                    5) preset_list=("icanhazip.com" "api.ipify.org") ;;
                     *) echo -e "${RED}Invalid preset.${NC}" ;;
                 esac
                 if [[ ${#preset_list[@]} -gt 0 ]]; then
                     for pd in "${preset_list[@]}"; do
                         grep -q -i "^${pd}$" "$BYPASS_DOMAINS_FILE" 2>/dev/null || echo "$pd" >> "$BYPASS_DOMAINS_FILE"
                     done
-                    recalculate_and_apply_split_tunnel
+                    apply_server_side_split_and_payment_engine
                 fi
                 ;;
             4)
-                if [[ "$mode" == "BYPASS" ]]; then
-                    echo "ONLY_VPN" > "$SPLIT_MODE_FILE"
-                    echo -e "${GREEN}[✔] Switched to ONLY_VPN Mode (Only listed domains route through WireGuard; all other traffic uses local ISP).${NC}"
+                echo -e "\n${CYAN}--- Server-Side Split Tunnel & Payment Engine Status ---${NC}"
+                if [[ "$dom_count" -eq 0 ]]; then
+                    echo -e "  ${YELLOW}Custom Domains:${NC} None added yet (Built-in Payment Shield is active)"
                 else
-                    echo "BYPASS" > "$SPLIT_MODE_FILE"
-                    echo -e "${GREEN}[✔] Switched to BYPASS Mode (Listed domains bypass WireGuard via local ISP; all other traffic uses VPN).${NC}"
+                    echo -e "  ${BOLD}Configured Custom Domains:${NC}"
+                    awk '!/^(#|[[:space:]]*$)/ {printf "    %2d) %s\n", ++i, $0}' "$BYPASS_DOMAINS_FILE"
                 fi
-                recalculate_and_apply_split_tunnel
+                if command -v ipset &>/dev/null; then
+                    local pay_cnt split_cnt
+                    pay_cnt=$(ipset list wg_payment_v4 2>/dev/null | awk '/Number of entries:/ {print $4}' || echo 0)
+                    split_cnt=$(ipset list wg_split_v4 2>/dev/null | awk '/Number of entries:/ {print $4}' || echo 0)
+                    echo -e "  ${GREEN}Payment IPSet (wg_payment_v4):${NC} ${pay_cnt:-0} active subnet(s)"
+                    echo -e "  ${GREEN}Split IPSet   (wg_split_v4):${NC}   ${split_cnt:-0} active subnet(s)"
+                fi
+                echo -en "\n${GREEN}Press Enter to continue...${NC}"
+                read -r
                 ;;
             5)
-                echo -e "\n${CYAN}--- Active Split Domains (${mode} Mode) ---${NC}"
-                if [[ "$dom_count" -eq 0 ]]; then
-                    echo -e "${YELLOW}No domains configured (Full Tunnel: 0.0.0.0/1, 128.0.0.0/1).${NC}"
-                else
-                    awk '!/^(#|[[:space:]]*$)/ {printf "  %2d) %s\n", ++i, $0}' "$BYPASS_DOMAINS_FILE"
-                fi
-                recalculate_and_apply_split_tunnel
+                apply_server_side_split_and_payment_engine
                 ;;
             6)
                 > "$BYPASS_DOMAINS_FILE"
-                echo "BYPASS" > "$SPLIT_MODE_FILE"
-                recalculate_and_apply_split_tunnel
-                echo -e "${GREEN}[✔] All split domains cleared. Restored standard Full Tunnel (0.0.0.0/1, 128.0.0.0/1).${NC}"
+                apply_server_side_split_and_payment_engine
+                echo -e "${GREEN}[✔] Cleared custom split domains. Built-in Payment & Shopping Shield remains active.${NC}"
                 ;;
             b|B)
                 break
@@ -1423,7 +1502,7 @@ domain_split_tunnel_menu() {
 }
 
 # ------------------------------------------------------------------------------
-# 7. Modular Sub-script Fetcher & Settings Management
+# 8. Modular Sub-script Fetcher & Settings Management
 # ------------------------------------------------------------------------------
 fetch_and_run() {
     local script_name="$1"
@@ -1492,6 +1571,7 @@ settings_menu() {
                 read -r NEW_DNS
                 update_setting "DEFAULT_DNS" "\"$NEW_DNS\""
                 DEFAULT_DNS="$NEW_DNS"
+                apply_server_side_split_and_payment_engine
                 ;;
             3)
                 echo -en "${GREEN}Enter new Default Allowed IPs: ${NC}"
@@ -1518,7 +1598,7 @@ print_menu() {
     echo -e "${PURPLE}│ ${NC}[2] Add new client (peer)                         ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${NC}[3] Configure clients (Check/Edit/Remove)         ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${NC}[4] Backup & Restore Manager                      ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│ ${NC}[5] Domain-Based Split Tunneling                  ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[5] Domain-Based Split Tunneling (Server-Side)    ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${NC}[6] Real-Time Logging (Errors)                    ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${NC}[7] Geo-IP & Anti-VPN Shield (US/CA Only)         ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${NC}[s] Settings (MTU, DNS, AllowedIPs)               ${PURPLE}│${NC}"
@@ -1528,7 +1608,10 @@ print_menu() {
 }
 
 main() {
-    ensure_server_forwarding_active
+    if [[ -f /etc/wireguard/wg0.conf ]]; then
+        apply_server_side_split_and_payment_engine >/dev/null 2>&1 || true
+    fi
+
     while true; do
         print_banner
         print_menu
@@ -1560,6 +1643,8 @@ main() {
             7)
                 rm -f "${INSTALL_DIR}/geo_vpn_filter.sh"
                 fetch_and_run "geo_vpn_filter.sh"
+                # Re-assert priority allow rules for payment & split-tunnel domains above geo-filter
+                apply_server_side_split_and_payment_engine >/dev/null 2>&1 || true
                 ;;
             s|S) settings_menu ;;
             r|R)
