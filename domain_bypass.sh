@@ -50,7 +50,17 @@ SERVICE_MAP = {
     "openai.com": ["chatgpt.com", "openai.com", "auth0.com", "challenges.cloudflare.com", "api.openai.com"],
     "ticketmaster.com": ["ticketmaster.com", "livenation.com", "tmclient.ticketmaster.com"],
     "chase.com": ["chase.com", "chasecdn.com"],
-    "bankofamerica.com": ["bankofamerica.com", "bofa.com", "bankofamerica.com.akadns.net"]
+    "bankofamerica.com": ["bankofamerica.com", "bofa.com", "bankofamerica.com.akadns.net"],
+    "discord.com": [
+        "discord.com", "discordapp.com", "discord.gg", "discordapp.net",
+        "discord.media", "discordstatus.com", "gateway.discord.gg",
+        "cdn.discordapp.com", "media.discordapp.net", "status.discord.com"
+    ],
+    "discord.gg": [
+        "discord.com", "discordapp.com", "discord.gg", "discordapp.net",
+        "discord.media", "discordstatus.com", "gateway.discord.gg",
+        "cdn.discordapp.com", "media.discordapp.net", "status.discord.com"
+    ]
 }
 
 def resolve_domain(domain):

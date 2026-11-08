@@ -413,6 +413,12 @@ for d in user_domains:
         expanded_user.update(['hulustream.com', 'huluim.com'])
     elif 'openai.com' in d or 'chatgpt.com' in d:
         expanded_user.update(['openai.com', 'chatgpt.com', 'oaistatic.com', 'oaiusercontent.com'])
+    elif 'discord.com' in d or 'discord.gg' in d or 'discordapp.com' in d:
+        expanded_user.update([
+            'discord.com', 'discordapp.com', 'discord.gg', 'discordapp.net',
+            'discord.media', 'discordstatus.com', 'gateway.discord.gg',
+            'cdn.discordapp.com', 'media.discordapp.net', 'status.discord.com'
+        ])
 
 upstream_dns = ["1.1.1.1", "8.8.8.8"]
 if os.path.isfile(settings_file):
@@ -1582,15 +1588,17 @@ domain_split_tunnel_menu() {
                 echo "  1) LinkedIn & Professional Networks (linkedin.com, licdn.com, lnkd.in + AS12447 CIDRs)"
                 echo "  2) Online Shopping, Payments & 3D-Secure (PayPal, Stripe, Amazon, Shopify, Klarna, Banks)"
                 echo "  3) Streaming Services (Netflix, Hulu, Disney+, Prime Video, Max, Spotify)"
-                echo "  4) AI Services (ChatGPT, OpenAI, Claude, Gemini, Perplexity)"
-                echo -en "${GREEN}Select preset [1-4]: ${NC}"
+                echo "  4) Discord & Chat (discord.com, discord.gg, discordapp.com, discordstatus.com)"
+                echo "  5) AI Services (ChatGPT, OpenAI, Claude, Gemini, Perplexity)"
+                echo -en "${GREEN}Select preset [1-5]: ${NC}"
                 read -r PRESET_CHOICE
                 local preset_list=()
                 case "$PRESET_CHOICE" in
                     1) preset_list=("linkedin.com" "licdn.com" "lnkd.in") ;;
                     2) preset_list=("paypal.com" "paypalobjects.com" "cardinalcommerce.com" "braintreegateway.com" "stripe.com" "online-metrix.net" "amazon.com" "shopify.com" "klarna.com" "affirm.com" "ebay.com" "chase.com" "bankofamerica.com" "wellsfargo.com") ;;
                     3) preset_list=("netflix.com" "hulu.com" "disneyplus.com" "primevideo.com" "max.com" "spotify.com") ;;
-                    4) preset_list=("openai.com" "chatgpt.com" "claude.ai" "anthropic.com" "gemini.google.com" "perplexity.ai") ;;
+                    4) preset_list=("discord.com" "discord.gg" "discordapp.com" "discordstatus.com") ;;
+                    5) preset_list=("openai.com" "chatgpt.com" "claude.ai" "anthropic.com" "gemini.google.com" "perplexity.ai") ;;
                     *) echo -e "${RED}Invalid preset.${NC}" ;;
                 esac
                 if [[ ${#preset_list[@]} -gt 0 ]]; then
