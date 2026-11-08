@@ -352,3 +352,11 @@ echo -e "\n${PURPLE}======================================================${NC}"
 echo -e "${GREEN}Server Setup Complete!${NC}"
 echo -e "${PURPLE}Your WireGuard server is running on port: ${PORT}${NC}"
 echo -e "${PURPLE}======================================================${NC}\n"
+
+if [[ -f /root/easy_wireguard/add_client.sh ]]; then
+    echo -e "${GREEN}Launching client generator (add_client.sh)...${NC}"
+    bash /root/easy_wireguard/add_client.sh || true
+elif [[ -f "./add_client.sh" ]]; then
+    echo -e "${GREEN}Launching client generator (add_client.sh)...${NC}"
+    bash "./add_client.sh" || true
+fi

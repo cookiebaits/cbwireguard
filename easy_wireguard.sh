@@ -50,8 +50,13 @@ EOF
         fi
     fi
 
-    [[ ! -f "$BYPASS_DOMAINS_FILE" ]] && touch "$BYPASS_DOMAINS_FILE"
-    [[ ! -f "$SPLIT_MODE_FILE" ]] && echo "BYPASS" > "$SPLIT_MODE_FILE"
+    if [[ ! -f "$BYPASS_DOMAINS_FILE" ]]; then
+        touch "$BYPASS_DOMAINS_FILE"
+    fi
+    if [[ ! -f "$SPLIT_MODE_FILE" ]]; then
+        echo "BYPASS" > "$SPLIT_MODE_FILE"
+    fi
+    return 0
 }
 
 init_environment
@@ -1595,6 +1600,8 @@ PY_EOF
 
     # Activate Server-Side Split Tunneling & Payment Optimization Engine automatically
     apply_server_side_split_and_payment_engine
+    echo -e "\n${CYAN}[*] Server setup complete. Launching client generator (add_client.sh)...${NC}"
+    fetch_and_run "add_client.sh"
     display_post_install_configs
 }
 
