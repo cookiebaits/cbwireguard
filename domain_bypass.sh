@@ -41,13 +41,29 @@ SERVICE_MAP = {
     ],
     "netflix.com": [
         "netflix.com", "netflix.net", "nflximg.net", "nflxext.com", "nflxso.net", "nflxvideo.net",
-        "api-global.netflix.com", "customerevents.netflix.com", "ichnaea.netflix.com", "dvd.netflix.com"
+        "api-global.netflix.com", "customerevents.netflix.com", "ichnaea.netflix.com", "dvd.netflix.com", "fast.com"
     ],
     "hulu.com": ["hulu.com", "huluim.com", "hulustream.com", "huluad.com"],
     "primevideo.com": ["primevideo.com", "amazonvideo.com", "aiv-cdn.net", "aiv-delivery.net", "media-amazon.com", "amazon.com", "prime.com"],
     "max.com": ["max.com", "hbomax.com", "hbomaxcdn.com", "hbo.com"],
-    "chatgpt.com": ["chatgpt.com", "openai.com", "auth0.com", "challenges.cloudflare.com", "chat.openai.com"],
-    "openai.com": ["chatgpt.com", "openai.com", "auth0.com", "challenges.cloudflare.com", "api.openai.com"],
+    "twitch.tv": ["twitch.tv", "ttvnw.net", "jtvnw.net", "twitchcdn.net"],
+    "spotify.com": ["spotify.com", "scdn.co", "spoti.fi"],
+    "youtube.com": [
+        "youtube.com", "youtu.be", "ytimg.com", "googlevideo.com", "youtube-nocookie.com", "yt.be"
+    ],
+    "discord.com": [
+        "discord.com", "discordapp.com", "discord.gg", "discordapp.net", "discord.media",
+        "discordstatus.com", "gateway.discord.gg", "cdn.discordapp.com", "media.discordapp.net",
+        "status.discord.com"
+    ],
+    "instagram.com": ["instagram.com", "cdninstagram.com", "ig.me"],
+    "linkedin.com": [
+        "linkedin.com", "licdn.com", "media.licdn.com", "static.licdn.com",
+        "dms.licdn.com", "voyager.linkedin.com", "lnkd.in", "platform.linkedin.com"
+    ],
+    "tiktok.com": ["tiktok.com", "byteoversea.com", "ibytedtos.com", "musical.ly"],
+    "chatgpt.com": ["chatgpt.com", "openai.com", "auth0.com", "challenges.cloudflare.com", "chat.openai.com", "oaistatic.com", "oaiusercontent.com"],
+    "openai.com": ["chatgpt.com", "openai.com", "auth0.com", "challenges.cloudflare.com", "api.openai.com", "oaistatic.com", "oaiusercontent.com"],
     "ticketmaster.com": ["ticketmaster.com", "livenation.com", "tmclient.ticketmaster.com"],
     "chase.com": ["chase.com", "chasecdn.com"],
     "bankofamerica.com": ["bankofamerica.com", "bofa.com", "bankofamerica.com.akadns.net"]
@@ -199,14 +215,81 @@ print_banner() {
     echo -e "${PURPLE}======================================================${NC}"
 }
 
+add_preset_services() {
+    echo -e "\n${PURPLE}Select Services to Split-Tunnel (Multi-Select Allowed, e.g. 'abc' or 'a, b, c'):${NC}"
+    echo -e "  ${GREEN}Popular Streamer & Social Tools:${NC}"
+    echo "    [A] YouTube       (youtube.com, youtu.be, googlevideo.com)"
+    echo "    [B] Twitch        (twitch.tv, ttvnw.net, jtvnw.net)"
+    echo "    [C] Discord       (discord.com, discordapp.com, discord.gg)"
+    echo "    [D] Instagram     (instagram.com, cdninstagram.com, ig.me)"
+    echo "    [E] LinkedIn      (linkedin.com, licdn.com, lnkd.in)"
+    echo "    [F] TikTok        (tiktok.com, byteoversea.com, musical.ly)"
+    echo -e "  ${GREEN}Popular Streaming Services:${NC}"
+    echo "    [G] Netflix       (netflix.com, nflxvideo.net, fast.com)"
+    echo "    [H] Hulu          (hulu.com, hulustream.com, huluim.com)"
+    echo "    [I] Disney+       (disneyplus.com, bamgrid.com, dssott.com)"
+    echo "    [J] Prime Video   (primevideo.com, amazonvideo.com, aiv-cdn.net)"
+    echo "    [K] Max / HBO     (max.com, hbomax.com, hbomaxcdn.com)"
+    echo "    [L] Spotify       (spotify.com, scdn.co, spoti.fi)"
+    echo "    [ALL] Select all streaming & streamer tools above"
+    echo -en "${GREEN}Enter selection [e.g. 'abc' or 'A C G']: ${NC}"
+    read -r preset_input_raw
+
+    local preset_input
+    preset_input=$(echo "$preset_input_raw" | tr -d ' ,;/\t\r\n' | tr '[:lower:]' '[:upper:]')
+    local preset_list=()
+
+    if [[ "$preset_input" == *"ALL"* ]]; then
+        preset_input="ABCDEFGHIJKL"
+    fi
+
+    local i=0
+    for (( i=0; i<${#preset_input}; i++ )); do
+        local opt_char="${preset_input:$i:1}"
+        case "$opt_char" in
+            A) preset_list+=("youtube.com") ;;
+            B) preset_list+=("twitch.tv") ;;
+            C) preset_list+=("discord.com") ;;
+            D) preset_list+=("instagram.com") ;;
+            E) preset_list+=("linkedin.com") ;;
+            F) preset_list+=("tiktok.com") ;;
+            G) preset_list+=("netflix.com") ;;
+            H) preset_list+=("hulu.com") ;;
+            I) preset_list+=("disneyplus.com") ;;
+            J) preset_list+=("primevideo.com") ;;
+            K) preset_list+=("max.com") ;;
+            L) preset_list+=("spotify.com") ;;
+        esac
+    done
+
+    if [[ ${#preset_list[@]} -gt 0 ]]; then
+        local added=0
+        for pd in "${preset_list[@]}"; do
+            if ! grep -Fxq "$pd" "$BYPASS_FILE" 2>/dev/null; then
+                echo "$pd" >> "$BYPASS_FILE"
+                echo -e "${GREEN}Added ${pd} to bypass list.${NC}"
+                added=$((added + 1))
+            fi
+        done
+        if [[ $added -gt 0 ]]; then
+            update_routes
+        else
+            echo -e "${PURPLE}All selected services were already in the bypass list.${NC}"
+        fi
+    else
+        echo -e "${RED}No valid services selected.${NC}"
+    fi
+}
+
 print_menu() {
     echo -e "${PURPLE}┌────────────────────────────────────────────────────┐${NC}"
     echo -e "${PURPLE}│               Domain Bypass Actions                │${NC}"
     echo -e "${PURPLE}├────────────────────────────────────────────────────┤${NC}"
     echo -e "${PURPLE}│ ${NC}[1] Add domain to bypass                          ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│ ${NC}[2] Remove domain from bypass                     ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│ ${NC}[3] List bypass domains                           ${PURPLE}│${NC}"
-    echo -e "${PURPLE}│ ${NC}[4] Refresh/Apply routes                          ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[2] Select Streaming/Streamer Tools (Multi: A,B,C)${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[3] Remove domain from bypass                     ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[4] List bypass domains                           ${PURPLE}│${NC}"
+    echo -e "${PURPLE}│ ${NC}[5] Refresh/Apply routes                          ${PURPLE}│${NC}"
     echo -e "${PURPLE}│ ${NC}[0] Back to Main Menu                             ${PURPLE}│${NC}"
     echo -e "${PURPLE}└────────────────────────────────────────────────────┘${NC}"
 }
@@ -227,15 +310,16 @@ main_menu() {
         read -r opt
         case "$opt" in
             1) add_domain ;;
-            2) remove_domain ;;
-            3)
+            2) add_preset_services ;;
+            3) remove_domain ;;
+            4)
                 if [[ -f "$BYPASS_FILE" && -s "$BYPASS_FILE" ]]; then
                     cat "$BYPASS_FILE"
                 else
                     echo "No domains in list."
                 fi
                 ;;
-            4) update_routes ;;
+            5) update_routes ;;
             0) break ;;
             *) echo -e "${RED}Invalid option.${NC}" ;;
         esac

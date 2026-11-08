@@ -398,21 +398,67 @@ for d in user_domains:
     expanded_user.add(d)
     if not d.startswith('www.') and d.count('.') == 1:
         expanded_user.add('www.' + d)
-    if 'linkedin.com' in d or 'licdn.com' in d:
+    if 'linkedin.com' in d or 'licdn.com' in d or d == 'linkedin':
         has_linkedin = True
         expanded_user.update([
             'linkedin.com', 'www.linkedin.com', 'licdn.com', 'media.licdn.com',
             'static.licdn.com', 'dms.licdn.com', 'voyager.linkedin.com', 'lnkd.in',
             'platform.linkedin.com', 'snap.licdn.com', 'px.ads.linkedin.com'
         ])
-    elif 'netflix.com' in d:
-        expanded_user.update(['nflxext.com', 'nflxso.net', 'nflxvideo.net', 'nflximg.net', 'fast.com'])
-    elif 'disneyplus.com' in d:
-        expanded_user.update(['disney-plus.net', 'dssott.com', 'bamgrid.com'])
-    elif 'hulu.com' in d:
-        expanded_user.update(['hulustream.com', 'huluim.com'])
-    elif 'openai.com' in d or 'chatgpt.com' in d:
-        expanded_user.update(['openai.com', 'chatgpt.com', 'oaistatic.com', 'oaiusercontent.com'])
+    elif 'netflix.com' in d or d == 'netflix':
+        expanded_user.update([
+            'netflix.com', 'www.netflix.com', 'netflix.net', 'nflximg.net', 'nflxext.com',
+            'nflxso.net', 'nflxvideo.net', 'api-global.netflix.com', 'customerevents.netflix.com',
+            'ichnaea.netflix.com', 'dvd.netflix.com', 'fast.com'
+        ])
+    elif 'disneyplus.com' in d or d == 'disneyplus' or d == 'disney':
+        expanded_user.update([
+            'disneyplus.com', 'www.disneyplus.com', 'bamgrid.com', 'dssott.com', 'disney-plus.net',
+            'disneystreaming.com', 'global.edge.bamgrid.com', 'api.disneyplus.com', 'auth.disneyplus.com',
+            'disney.com', 'go.com', 'my.disney.com', 'disneyid.disney.com'
+        ])
+    elif 'hulu.com' in d or d == 'hulu':
+        expanded_user.update([
+            'hulu.com', 'www.hulu.com', 'huluim.com', 'hulustream.com', 'huluad.com'
+        ])
+    elif 'primevideo.com' in d or d == 'primevideo' or d == 'prime':
+        expanded_user.update([
+            'primevideo.com', 'www.primevideo.com', 'amazonvideo.com', 'aiv-cdn.net',
+            'aiv-delivery.net', 'media-amazon.com', 'prime.com'
+        ])
+    elif 'max.com' in d or 'hbomax.com' in d or d == 'max' or d == 'hbo':
+        expanded_user.update([
+            'max.com', 'www.max.com', 'hbomax.com', 'www.hbomax.com', 'hbomaxcdn.com', 'hbo.com'
+        ])
+    elif 'youtube.com' in d or 'youtu.be' in d or d == 'youtube':
+        expanded_user.update([
+            'youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be', 'ytimg.com',
+            'googlevideo.com', 'youtube-nocookie.com', 'yt.be', 'youtube-ui.l.google.com'
+        ])
+    elif 'twitch.tv' in d or d == 'twitch':
+        expanded_user.update([
+            'twitch.tv', 'www.twitch.tv', 'ttvnw.net', 'jtvnw.net', 'twitchcdn.net'
+        ])
+    elif 'discord.com' in d or 'discordapp.com' in d or 'discord.gg' in d or d == 'discord':
+        expanded_user.update([
+            'discord.com', 'www.discord.com', 'discordapp.com', 'discord.gg', 'discordapp.net',
+            'discord.media', 'discordstatus.com', 'gateway.discord.gg', 'cdn.discordapp.com',
+            'media.discordapp.net', 'status.discord.com'
+        ])
+    elif 'instagram.com' in d or d == 'instagram':
+        expanded_user.update([
+            'instagram.com', 'www.instagram.com', 'cdninstagram.com', 'ig.me'
+        ])
+    elif 'spotify.com' in d or d == 'spotify':
+        expanded_user.update([
+            'spotify.com', 'www.spotify.com', 'scdn.co', 'spoti.fi'
+        ])
+    elif 'tiktok.com' in d or d == 'tiktok':
+        expanded_user.update([
+            'tiktok.com', 'www.tiktok.com', 'byteoversea.com', 'ibytedtos.com', 'musical.ly'
+        ])
+    elif 'openai.com' in d or 'chatgpt.com' in d or d == 'chatgpt' or d == 'openai':
+        expanded_user.update(['openai.com', 'chatgpt.com', 'oaistatic.com', 'oaiusercontent.com', 'auth0.com'])
 
 upstream_dns = ["1.1.1.1", "8.8.8.8"]
 if os.path.isfile(settings_file):
@@ -1351,17 +1397,62 @@ select_safe_dns_resolver() {
 select_setup_split_domains() {
     echo -e "\033[0;36m\033[1mServer-Side Split Tunneling (Keeps Client AllowedIPs Simple!):\033[0m"
     echo -e "   • Payment & Shopping sites (PayPal, Stripe, 3D-Secure, Amazon, Banks) are auto-protected."
-    echo -e "   • Enter any extra domains to split-tunnel on the server (e.g. linkedin.com, netflix.com)"
-    read -rp "Domains to split-tunnel [comma/space separated, or press Enter for none]: " SETUP_SPLIT_DOMS
+    echo -e "   • Choose preset services or enter extra domains (e.g. A, B, C or custom domain):"
+    echo -e "     [A] YouTube     [B] Twitch      [C] Discord       [D] Netflix"
+    echo -e "     [E] Hulu        [F] Disney+     [G] Prime Video   [H] Max / HBO"
+    echo -e "     [I] LinkedIn    [J] Instagram   [K] Spotify       [L] TikTok"
+    echo -e "   (You can type multiple letters like 'abc' or comma-separated, plus any custom domain)"
+    read -rp "Selection / domains [e.g. 'abc' or 'netflix.com', or press Enter to skip]: " SETUP_SPLIT_DOMS
     if [[ -n "${SETUP_SPLIT_DOMS:-}" ]]; then
         mkdir -p /root/easy_wireguard
         touch /root/easy_wireguard/bypass_domains.txt
-        for raw_d in ${SETUP_SPLIT_DOMS//,/ }; do
+
+        local raw_input="$SETUP_SPLIT_DOMS"
+        local letter_chars=""
+        local custom_tokens=()
+
+        # Parse tokens
+        for tok in ${raw_input//,/ }; do
+            local tok_clean
+            tok_clean=$(echo "$tok" | tr -d ' \t\r\n')
+            if [[ "$tok_clean" =~ ^[a-lA-L]+$ ]]; then
+                letter_chars+="$tok_clean"
+            elif [[ "$tok_clean" == *.* ]]; then
+                custom_tokens+=("$tok_clean")
+            fi
+        done
+
+        local queued_domains=()
+        letter_chars=$(echo "$letter_chars" | tr '[:upper:]' '[:lower:]')
+        local i=0
+        for (( i=0; i<${#letter_chars}; i++ )); do
+            local ch="${letter_chars:$i:1}"
+            case "$ch" in
+                a) queued_domains+=("youtube.com") ;;
+                b) queued_domains+=("twitch.tv") ;;
+                c) queued_domains+=("discord.com") ;;
+                d) queued_domains+=("netflix.com") ;;
+                e) queued_domains+=("hulu.com") ;;
+                f) queued_domains+=("disneyplus.com") ;;
+                g) queued_domains+=("primevideo.com") ;;
+                h) queued_domains+=("max.com") ;;
+                i) queued_domains+=("linkedin.com") ;;
+                j) queued_domains+=("instagram.com") ;;
+                k) queued_domains+=("spotify.com") ;;
+                l) queued_domains+=("tiktok.com") ;;
+            esac
+        done
+
+        for cdom in "${custom_tokens[@]}"; do
             local clean_d
-            clean_d=$(echo "$raw_d" | sed -e 's|^https*://||' -e 's|/.*$||' | tr '[:upper:]' '[:lower:]' | tr -d ' \t\r\n')
-            if [[ -n "$clean_d" && "$clean_d" == *.* ]]; then
-                grep -q -i "^${clean_d}$" /root/easy_wireguard/bypass_domains.txt 2>/dev/null || echo "$clean_d" >> /root/easy_wireguard/bypass_domains.txt
-                echo -e "\033[0;32m[✔] Queued '${clean_d}' for Server-Side Split Tunneling (Client AllowedIPs remains simple).\033[0m"
+            clean_d=$(echo "$cdom" | sed -e 's|^https*://||' -e 's|/.*$||' | tr '[:upper:]' '[:lower:]' | tr -d ' \t\r\n')
+            [[ -n "$clean_d" ]] && queued_domains+=("$clean_d")
+        done
+
+        for qd in "${queued_domains[@]}"; do
+            if ! grep -q -i "^${qd}$" /root/easy_wireguard/bypass_domains.txt 2>/dev/null; then
+                echo "$qd" >> /root/easy_wireguard/bypass_domains.txt
+                echo -e "\033[0;32m[✔] Queued '${qd}' for Server-Side Split Tunneling (Client AllowedIPs remains simple).\033[0m"
             fi
         done
         echo ""
@@ -1526,7 +1617,7 @@ domain_split_tunnel_menu() {
         echo -e "${PURPLE}├──────────────────────────────────────────────────────────────┤${NC}"
         echo -e "${PURPLE}│${NC} [1] Add Domain(s) (e.g. linkedin.com, netflix.com)           ${PURPLE}│${NC}"
         echo -e "${PURPLE}│${NC} [2] Remove a Domain                                          ${PURPLE}│${NC}"
-        echo -e "${PURPLE}│${NC} [3] Add Preset Category (LinkedIn/Social, Shopping, AI)      ${PURPLE}│${NC}"
+        echo -e "${PURPLE}│${NC} [3] Select Streaming & Streamer Tools (Multi-Select: A,B,C)  ${PURPLE}│${NC}"
         echo -e "${PURPLE}│${NC} [4] View Active Split Domains & Live Server IPSet Status     ${PURPLE}│${NC}"
         echo -e "${PURPLE}│${NC} [5] Force Refresh Server-Side Split & Payment Rules Now      ${PURPLE}│${NC}"
         echo -e "${PURPLE}│${NC} [6] Clear Custom Split Domains (Keep Payment Shield Active)  ${PURPLE}│${NC}"
@@ -1578,26 +1669,69 @@ domain_split_tunnel_menu() {
                 fi
                 ;;
             3)
-                echo -e "\n${CYAN}Select Server-Side Preset Category:${NC}"
-                echo "  1) LinkedIn & Professional Networks (linkedin.com, licdn.com, lnkd.in + AS12447 CIDRs)"
-                echo "  2) Online Shopping, Payments & 3D-Secure (PayPal, Stripe, Amazon, Shopify, Klarna, Banks)"
-                echo "  3) Streaming Services (Netflix, Hulu, Disney+, Prime Video, Max, Spotify)"
-                echo "  4) AI Services (ChatGPT, OpenAI, Claude, Gemini, Perplexity)"
-                echo -en "${GREEN}Select preset [1-4]: ${NC}"
+                echo -e "\n${CYAN}Select Services to Split-Tunnel (Multi-Select Allowed, e.g. 'abc' or 'a, b, c'):${NC}"
+                echo -e "  ${BOLD}Popular Streamer & Social Tools:${NC}"
+                echo "    [A] YouTube       (youtube.com, youtu.be, googlevideo.com)"
+                echo "    [B] Twitch        (twitch.tv, ttvnw.net, jtvnw.net)"
+                echo "    [C] Discord       (discord.com, discordapp.com, discord.gg)"
+                echo "    [D] Instagram     (instagram.com, cdninstagram.com, ig.me)"
+                echo "    [E] LinkedIn      (linkedin.com, licdn.com, lnkd.in + AS12447 CIDRs)"
+                echo "    [F] TikTok        (tiktok.com, byteoversea.com, musical.ly)"
+                echo -e "  ${BOLD}Popular Streaming Services:${NC}"
+                echo "    [G] Netflix       (netflix.com, nflxvideo.net, fast.com)"
+                echo "    [H] Hulu          (hulu.com, hulustream.com, huluim.com)"
+                echo "    [I] Disney+       (disneyplus.com, bamgrid.com, dssott.com)"
+                echo "    [J] Prime Video   (primevideo.com, amazonvideo.com, aiv-cdn.net)"
+                echo "    [K] Max / HBO     (max.com, hbomax.com, hbomaxcdn.com)"
+                echo "    [L] Spotify       (spotify.com, scdn.co, spoti.fi)"
+                echo -e "  ${BOLD}Other Popular Presets:${NC}"
+                echo "    [M] Online Shopping & Banking (PayPal, Stripe, Amazon, Shopify, Banks)"
+                echo "    [N] AI Services               (ChatGPT, OpenAI, Claude, Gemini, Perplexity)"
+                echo "    [ALL] Select all streaming & streamer tools above"
+                echo -en "${GREEN}Enter selection [e.g. 'abc' or 'A C G']: ${NC}"
                 read -r PRESET_CHOICE
+
+                local preset_input
+                preset_input=$(echo "$PRESET_CHOICE" | tr -d ' ,;/\t\r\n' | tr '[:lower:]' '[:upper:]')
                 local preset_list=()
-                case "$PRESET_CHOICE" in
-                    1) preset_list=("linkedin.com" "licdn.com" "lnkd.in") ;;
-                    2) preset_list=("paypal.com" "paypalobjects.com" "cardinalcommerce.com" "braintreegateway.com" "stripe.com" "online-metrix.net" "amazon.com" "shopify.com" "klarna.com" "affirm.com" "ebay.com" "chase.com" "bankofamerica.com" "wellsfargo.com") ;;
-                    3) preset_list=("netflix.com" "hulu.com" "disneyplus.com" "primevideo.com" "max.com" "spotify.com") ;;
-                    4) preset_list=("openai.com" "chatgpt.com" "claude.ai" "anthropic.com" "gemini.google.com" "perplexity.ai") ;;
-                    *) echo -e "${RED}Invalid preset.${NC}" ;;
-                esac
+
+                if [[ "$preset_input" == *"ALL"* ]]; then
+                    preset_input="ABCDEFGHIJKL"
+                fi
+
+                local i=0
+                for (( i=0; i<${#preset_input}; i++ )); do
+                    local opt_char="${preset_input:$i:1}"
+                    case "$opt_char" in
+                        A) preset_list+=("youtube.com") ;;
+                        B) preset_list+=("twitch.tv") ;;
+                        C) preset_list+=("discord.com") ;;
+                        D) preset_list+=("instagram.com") ;;
+                        E) preset_list+=("linkedin.com" "licdn.com" "lnkd.in") ;;
+                        F) preset_list+=("tiktok.com") ;;
+                        G) preset_list+=("netflix.com") ;;
+                        H) preset_list+=("hulu.com") ;;
+                        I) preset_list+=("disneyplus.com") ;;
+                        J) preset_list+=("primevideo.com") ;;
+                        K) preset_list+=("max.com") ;;
+                        L) preset_list+=("spotify.com") ;;
+                        M) preset_list+=("paypal.com" "paypalobjects.com" "cardinalcommerce.com" "braintreegateway.com" "stripe.com" "online-metrix.net" "amazon.com" "shopify.com" "klarna.com" "affirm.com" "ebay.com" "chase.com" "bankofamerica.com" "wellsfargo.com") ;;
+                        N) preset_list+=("openai.com" "chatgpt.com" "claude.ai" "anthropic.com" "gemini.google.com" "perplexity.ai") ;;
+                    esac
+                done
+
                 if [[ ${#preset_list[@]} -gt 0 ]]; then
+                    local added_preset=0
                     for pd in "${preset_list[@]}"; do
-                        grep -q -i "^${pd}$" "$BYPASS_DOMAINS_FILE" 2>/dev/null || echo "$pd" >> "$BYPASS_DOMAINS_FILE"
+                        if ! grep -q -i "^${pd}$" "$BYPASS_DOMAINS_FILE" 2>/dev/null; then
+                            echo "$pd" >> "$BYPASS_DOMAINS_FILE"
+                            added_preset=$((added_preset + 1))
+                        fi
                     done
+                    echo -e "${GREEN}[✔] Added ${added_preset} domain(s) from selected service(s).${NC}"
                     apply_server_side_split_and_payment_engine
+                else
+                    echo -e "${RED}No valid services selected.${NC}"
                 fi
                 ;;
             4)

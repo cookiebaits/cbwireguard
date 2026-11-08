@@ -166,11 +166,42 @@ if [[ -n "$input_MTU" ]]; then
     MTU="$input_MTU"
 fi
 
-echo -en "${GREEN}Do you want to add a domain exemption for split tunneling? Enter domain or leave blank to skip: ${NC}"
+echo -e "${GREEN}Split Tunneling Options (Enter preset letters e.g. 'abc', custom domains, or leave blank to skip):${NC}"
+echo -e "  [A] YouTube     [B] Twitch      [C] Discord       [D] Instagram"
+echo -e "  [E] LinkedIn    [F] TikTok      [G] Netflix       [H] Hulu"
+echo -e "  [I] Disney+     [J] Prime Video [K] Max / HBO     [L] Spotify"
+echo -en "${GREEN}Selection / domain [e.g. 'abc' or 'netflix.com', Enter to skip]: ${NC}"
 read -r input_BYPASS
+BYPASS_DOMAINS=()
 if [[ -n "$input_BYPASS" ]]; then
     HAS_BYPASS=true
-    BYPASS_DOMAIN="$input_BYPASS"
+    clean_letters=""
+    for tok in ${input_BYPASS//,/ }; do
+        tok_clean=$(echo "$tok" | tr -d ' \t\r\n')
+        if [[ "$tok_clean" =~ ^[a-lA-L]+$ ]]; then
+            clean_letters+="$tok_clean"
+        elif [[ "$tok_clean" == *.* ]]; then
+            BYPASS_DOMAINS+=("$tok_clean")
+        fi
+    done
+    clean_letters=$(echo "$clean_letters" | tr '[:upper:]' '[:lower:]')
+    for (( i=0; i<${#clean_letters}; i++ )); do
+        ch="${clean_letters:$i:1}"
+        case "$ch" in
+            a) BYPASS_DOMAINS+=("youtube.com") ;;
+            b) BYPASS_DOMAINS+=("twitch.tv") ;;
+            c) BYPASS_DOMAINS+=("discord.com") ;;
+            d) BYPASS_DOMAINS+=("instagram.com") ;;
+            e) BYPASS_DOMAINS+=("linkedin.com") ;;
+            f) BYPASS_DOMAINS+=("tiktok.com") ;;
+            g) BYPASS_DOMAINS+=("netflix.com") ;;
+            h) BYPASS_DOMAINS+=("hulu.com") ;;
+            i) BYPASS_DOMAINS+=("disneyplus.com") ;;
+            j) BYPASS_DOMAINS+=("primevideo.com") ;;
+            k) BYPASS_DOMAINS+=("max.com") ;;
+            l) BYPASS_DOMAINS+=("spotify.com") ;;
+        esac
+    done
 else
     HAS_BYPASS=false
 fi
@@ -192,7 +223,11 @@ mkdir -p /etc/wireguard
 chmod 700 /etc/wireguard
 
 if [[ "$HAS_BYPASS" == "true" ]]; then
-    echo "$BYPASS_DOMAIN" >> /etc/wireguard/bypass_domains.txt
+    for b_dom in "${BYPASS_DOMAINS[@]}"; do
+        if ! grep -q -i "^${b_dom}$" /etc/wireguard/bypass_domains.txt 2>/dev/null; then
+            echo "$b_dom" >> /etc/wireguard/bypass_domains.txt
+        fi
+    done
 fi
 
 SERVER_PRIVATE=$(wg genkey)
